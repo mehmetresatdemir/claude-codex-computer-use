@@ -27,7 +27,9 @@ Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_app
 | **`menu`** — click a menu-bar path like `["Insert","Shape","Triangle"]`, skipping intermediate items when the target is already visible | 3 calls → 1 |
 | **`find_elements`** — return only matching tree lines | small replies |
 | `include_screenshot` on every tool, **default off**; when on, the JPEG is downscaled with `sips` to 1280 px and the original size + multiplier is appended | 159 KB → ~3 KB (off) / ~125 KB (on) |
-| **`output: "diff"`** on `batch`/`run_macro` — window line + lines added/removed since the batch started (index-independent) + focus line | tens of lines instead of the whole tree; surprises (e.g. a Quick Look window) show up on the first line |
+| **`output: "diff"`** on `batch`/`run_macro` — window line + lines added/removed since the batch started (index-independent) + focus line; `compact` hides scroll bars, arrow buttons, handles and other noise | tens of lines instead of the whole tree; surprises (e.g. a Quick Look window) show up on the first line |
+| **Per-step timings + screenshot on error** — every step logs its ms and the total; if a step fails, a downscaled screenshot is attached automatically | free benchmarking and diagnosis |
+| **App notes** — known traps per app attached once to results (built-in notes for Freeform; extend via `~/.codex-cua-plus/notes.json`) | the model doesn't fall into the same trap twice |
 | **Macros** — `save_macro` / `run_macro` / `list_macros`; stored in `~/.codex-cua-plus/macros.json`, `{{param}}` placeholders filled at run time; `open_path_in_dialog` and `recover` can be steps | a recurring job = 1 call (Freeform insert: 6 steps, 6.8 s) |
 | **`recover`** + `batch.auto_recover` — if the tree root is an open/stuck menu: Escape → the menu's Cancel action → coordinate click on the title bar, each step verified; runs automatically inside `batch` when `find` misses in a menu tree | no manual intervention |
 | `press_key.repeat` | e.g. 15× `shift+Down` in one call |
@@ -149,7 +151,9 @@ Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmas�
 | **`menu`** | `path:["Insert","Shape","Triangle"]` — menü çubuğundan yol tıklar. Codex menü ağacını iç içe verdiği için hedef görünür olunca ara adımları atlar. | 3 tur → 1 |
 | **`find_elements`** | Ağacın tamamını döndürmeden sorguyla eşleşen satırları verir. | Küçük yanıt |
 | `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. Açıkken görüntü `sips` ile **1280 px'e küçültülür** (JPEG kalite 70), orijinal çözünürlük ve çarpan metne yazılır. | 159 KB → ~3 KB (kapalı) / ~125 KB → küçültülmüş |
-| **`output: "diff"`** (`batch`, `run_macro`) | Tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız) + odak satırı. | Yanıt onlarca satıra iner; beklenmedik pencereler (ör. Quick Look) anında görünür |
+| **`output: "diff"`** (`batch`, `run_macro`) | Tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız) + odak satırı. `compact` (varsayılan) kaydırma çubuğu/ok düğmesi/tutamaç gibi gürültüyü gizler. | Yanıt onlarca satıra iner; beklenmedik pencereler (ör. Quick Look) anında görünür |
+| **Adım süreleri + hatada görüntü** | Günlükte her adımın ms'si ve toplam; bir adım durursa (`screenshot_on_error`) küçültülmüş görüntü otomatik eklenir. | Kıyaslama ve teşhis bedava |
+| **Uygulama notları** | Uygulamaya özel bilinen tuzaklar sonuçlara bir kez iliştirilir (yerleşik Freeform notları; `~/.codex-cua-plus/notes.json` ile genişletilir). | Model aynı tuzağa ikinci kez düşmez |
 | **Makrolar** `save_macro` / `run_macro` / `list_macros` | Başarılı bir eylem listesini isimle sakla (`~/.codex-cua-plus/macros.json`), `{{param}}` ile parametreleyip tek çağrıda çalıştır. `open_path_in_dialog` ve `recover` de eylem olarak girebilir. Örnek: `examples/macros/freeform_insert.json`. | Tekrarlayan iş = 1 çağrı |
 | **`recover`** + `batch.auto_recover` | Ağaç kökü açık/takılı menüyse: Escape → menünün Cancel eylemi → başlık çubuğuna koordinatla tıklama; her adım doğrulanır. `batch` içinde `find` menüde bulamazsa otomatik devreye girer. | Takılı menü elle müdahale istemez |
 | `press_key.repeat` | Aynı tuşu N kez (ör. 15× `shift+Down`). | 15 tur → 1 |

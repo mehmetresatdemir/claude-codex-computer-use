@@ -1,5 +1,13 @@
 # Değişiklikler
 
+## 0.4.0 — 2026-10-02
+
+- **`compact` diff** (varsayılan açık): kaydırma çubuğu, ok/sayfa düğmeleri, tutamaç, ayırıcı ve başlıksız image/text/cell satırları diff'ten gizlenir; gizlenen sayı yazılır. Gerçek koşuda +38/−47 satırlık diff'in çoğu buydu.
+- **Adım süreleri**: batch/makro günlüğünde her adımın ms'si ve toplam süre (+ re-query sayısı).
+- **Hatada ekran görüntüsü** (`screenshot_on_error`, varsayılan açık): bir adım durursa küçültülmüş görüntü otomatik eklenir, sonuç `isError` olur.
+- **Uygulama notları**: `get_app_state`/`batch`/`run_macro` sonuçlarına uygulamaya özel bilinen tuzaklar bir kez iliştirilir (yerleşik Freeform notları; `~/.codex-cua-plus/notes.json` ile ekle: `{"freeform": ["..."], "numbers": ["..."]}`; anahtar uygulama adında alt dize olarak aranır).
+- İlk gerçek Claude Code koşusu: `run_macro("freeform_insert")` → 1 çağrı, 6 adım, resim eklendi.
+
 ## 0.3.0 — 2026-10-02
 
 - **`output: "diff"`** (`batch`, `run_macro`): tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız karşılaştırma) + odak satırı.

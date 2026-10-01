@@ -18,7 +18,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -146,12 +146,47 @@ function treeDiff(before, after) {
   for (const r of parseTree(after || "")) { const d = (countB.get(r.rest) || 0) - (countA.get(r.rest) || 0); if (d > 0) { added.push(`${r.index} ${r.rest}`); countB.set(r.rest, (countB.get(r.rest) || 0) - 1); } }
   return { added, removed };
 }
-function diffText(before, after) {
-  const { added, removed } = treeDiff(before, after);
+// Diff'te gürültü sayılan satırlar: kaydırma çubukları, ok/sayfa düğmeleri, ayırıcılar, başlıksız image/text/cell/container.
+const NOISE_RE = /^(scroll bar\b|value indicator\b|increment (arrow|page) button|decrement (arrow|page) button|splitter\b|image$|text$|cell$|container$|section\b|collection$|group$|split group\b|scroll area\b|toolbar$|menu bar$|handle Description:)/;
+function diffText(before, after, { compact = true } = {}) {
+  let { added, removed } = treeDiff(before, after);
+  let hidden = 0;
+  if (compact) {
+    const keep = (l) => !NOISE_RE.test(l.replace(/^\d+ /, ""));
+    const a2 = added.filter(keep), r2 = removed.filter(keep);
+    hidden = (added.length - a2.length) + (removed.length - r2.length);
+    added = a2; removed = r2;
+  }
   const focus = (after || "").match(/^The focused UI element is .*$/m)?.[0] || "";
-  return [windowLine(after), `+${added.length} satır, -${removed.length} satır`,
+  return [windowLine(after), `+${added.length} satır, -${removed.length} satır${hidden ? ` (${hidden} gürültü satırı gizlendi; compact:false ile göster)` : ""}`,
     ...added.slice(0, 60).map((l) => `+ ${l}`), ...removed.slice(0, 30).map((l) => `- ${l}`),
     added.length > 60 || removed.length > 30 ? "(kısaltıldı; tam ağaç için output:\"full\")" : "", focus].filter(Boolean).join("\n");
+}
+
+// ---------- uygulama notları ----------
+// Bilinen tuzaklar; sonuçlara "Notlar" olarak iliştirilir. Kullanıcı ~/.codex-cua-plus/notes.json ile ekler/ezer.
+const NOTES_FILE = join(MACRO_DIR, "notes.json");
+const BUILTIN_NOTES = {
+  "freeform": [
+    "Tuval öğesine (image/layout item) find ile tıklamak AXPress gönderir → Quick Look açılır, öğe seçilmez. Seçmek için koordinatla tıkla (click x,y).",
+    "drag ve tutamaçlara set_value şekilleri taşımaz/boyutlandırmaz (sentetik sürükleme yoksayılır). Resimleri dosya olarak ekle (Insert > Choose File).",
+    "Pano içinde Escape 'All Boards' görünümüne döndürebilir. Menü çubuğu 'Insert' öğesi tam eşleşmeyle bulunur; alt menü öğeleri (Shape > Triangle) aynı ağaçta görünür.",
+    "Quick Look açıksa Escape kapatmayabilir; 'close panel button' öğesine tıkla.",
+  ],
+};
+function notesFor(app) {
+  if (!app) return [];
+  let user = {}; try { user = JSON.parse(readFileSync(NOTES_FILE, "utf8")); } catch {}
+  const key = Object.keys({ ...BUILTIN_NOTES, ...user }).find((k) => String(app).toLowerCase().includes(k.toLowerCase()));
+  if (!key) return [];
+  return [...(BUILTIN_NOTES[key] || []), ...((user[key] || []))];
+}
+const notesShown = new Set(); // aynı oturumda aynı uygulama için notları bir kez göster
+function withNotes(result, app) {
+  const n = notesFor(app);
+  if (!n.length || notesShown.has(app) || !result?.content) return result;
+  notesShown.add(app);
+  return { ...result, content: [...result.content, { type: "text", text: `Notlar (${app}):\n${n.map((x) => `- ${x}`).join("\n")}` }] };
 }
 
 // ---------- makrolar ----------
@@ -241,6 +276,8 @@ const EXTRA_TOOLS = [
         include_screenshot: { type: "boolean", description: `Son durumda ekran görüntüsü (varsayılan ${DEFAULT_SCREENSHOT}).` },
         final_state: { type: "boolean", description: "Sonda get_app_state çağır (varsayılan true)." },
         output: { type: "string", enum: ["full", "diff"], description: "full: son ağacın tamamı (varsayılan). diff: pencere satırı + batch öncesine göre eklenen/silinen satırlar; çok daha küçük." },
+        compact: { type: "boolean", description: "diff'te gürültü satırlarını (kaydırma çubuğu, ok düğmeleri, tutamaç, başlıksız image/text) gizle (varsayılan true)." },
+        screenshot_on_error: { type: "boolean", description: "Bir adım hata verirse teşhis için küçültülmüş ekran görüntüsü ekle (varsayılan true)." },
         auto_recover: { type: "boolean", description: "Ağaç kökü takılı bir menüyse ve find orada bulamazsa önce menüyü kapatmayı dene (varsayılan true)." },
       },
       required: ["actions"],
@@ -273,6 +310,7 @@ const EXTRA_TOOLS = [
       properties: {
         name: { type: "string" }, params: { type: "object", description: "{{param}} değerleri." },
         app: { type: "string" }, include_screenshot: { type: "boolean" }, output: { type: "string", enum: ["full", "diff"] }, final_state: { type: "boolean" },
+        compact: { type: "boolean" }, screenshot_on_error: { type: "boolean" },
       },
       required: ["name"],
     },
@@ -446,32 +484,42 @@ async function runBatch(app, actions, { finalState = true, autoRecover = true, c
   const log = [];
   let last = null, before = null;
   if (captureBefore && app) { const st = await callUpstream("get_app_state", { app }); before = resultText(st); state.lastTree = before; }
+  const t0 = Date.now();
+  let failed = false;
   for (const [i, a] of (actions || []).entries()) {
     const label = `${i + 1}. ${a.tool}${a.repeat > 1 ? `×${a.repeat}` : ""}${a.find ? ` find="${a.find}"` : ""}`;
+    const ts = Date.now();
     try {
       const r = await runAction(app, a, state);
       if (state.recoverLog?.length) { log.push(...state.recoverLog); state.recoverLog = []; }
       if (r.result) last = r.result;
-      if (r.error) { log.push(`${label} HATA: ${r.error}`); break; }
-      log.push(`${label} ok${r.note ? ` ${r.note}` : ""}`);
-    } catch (e) { log.push(`${label} HATA: ${e.message}`); break; }
+      const ms = `${Date.now() - ts} ms`;
+      if (r.error) { log.push(`${label} HATA (${ms}): ${r.error}`); failed = true; break; }
+      log.push(`${label} ok (${ms})${r.note ? ` ${r.note}` : ""}`);
+    } catch (e) { log.push(`${label} HATA (${Date.now() - ts} ms): ${e.message}`); failed = true; break; }
   }
   if (finalState && app) {
     const st = await callUpstream("get_app_state", { app });
     if (!isSoftError(st) || !last) last = st;
   }
-  return { last, log, before };
+  log.push(`toplam ${Date.now() - t0} ms${state.requeried ? `, ${state.requeried} re-query` : ""}`);
+  return { last, log, before, failed };
 }
 // batch benzeri sonuçları ortak biçimde paketle (full / diff).
-async function packBatch(title, { last, log, before }, { wantShot, output }) {
+async function packBatch(title, { last, log, before, failed }, { wantShot, output, compact = true, app, shotOnError = true }) {
   const result = last || { content: [] };
+  const shot = wantShot || (failed && shotOnError); // hata olduysa teşhis için görüntüyü ekle
+  let out;
   if (output === "diff") {
     const after = resultText(result);
-    const shot = wantShot ? (await shrinkScreenshot(result)).content.filter((c) => c.type !== "text") : [];
-    return { content: [{ type: "text", text: `${title}:\n${log.join("\n")}\n\n[diff]\n${looksLikeTree(after) ? diffText(before, after) : after.slice(0, 1500)}` }, ...shot] };
+    const img = shot ? (await shrinkScreenshot(result)).content.filter((c) => c.type !== "text") : [];
+    out = { content: [{ type: "text", text: `${title}:\n${log.join("\n")}\n\n[diff]\n${looksLikeTree(after) ? diffText(before, after, { compact }) : after.slice(0, 1500)}` }, ...img] };
+  } else {
+    const o = await finish(result, shot);
+    out = { ...o, content: [{ type: "text", text: `${title}:\n${log.join("\n")}` }, ...(o.content || [])] };
   }
-  const out = await finish(result, wantShot);
-  return { ...out, content: [{ type: "text", text: `${title}:\n${log.join("\n")}` }, ...(out.content || [])] };
+  if (failed) { out.isError = true; if (shotOnError && !wantShot) out.content.push({ type: "text", text: "(hata nedeniyle ekran görüntüsü eklendi)" }); }
+  return withNotes(out, app);
 }
 
 // Aç/Kaydet panelinde ⌘⇧G ile yola gider, dosya seçimini bekler, OK düğmesini ağaçtan tıklar.
@@ -512,7 +560,7 @@ async function callTool(name, rawArgs) {
 
   if (name === "batch") {
     const res = await runBatch(args.app, args.actions, { finalState: args.final_state !== false, autoRecover: args.auto_recover !== false, captureBefore: args.output === "diff" });
-    return packBatch("batch", res, { wantShot, output: args.output });
+    return packBatch("batch", res, { wantShot, output: args.output, compact: args.compact !== false, app: args.app, shotOnError: args.screenshot_on_error !== false });
   }
 
   if (name === "recover") {
@@ -542,7 +590,7 @@ async function callTool(name, rawArgs) {
     const actions = substitute(macro.actions, params);
     const app = args.app || macro.app;
     const res = await runBatch(app, actions, { finalState: args.final_state !== false, captureBefore: args.output === "diff" });
-    return packBatch(`run_macro ${args.name}`, res, { wantShot, output: args.output });
+    return packBatch(`run_macro ${args.name}`, res, { wantShot, output: args.output, compact: args.compact !== false, app, shotOnError: args.screenshot_on_error !== false });
   }
 
   if (name === "menu") {
@@ -600,7 +648,7 @@ async function callTool(name, rawArgs) {
 
   const r = await callUpstream(name, args);
   if (name === "list_apps") return r;
-  return finish(r, wantShot);
+  return withNotes(await finish(r, wantShot), args.app);
 }
 
 // ---------- alt akış (Claude Code) ----------
