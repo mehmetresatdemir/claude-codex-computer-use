@@ -5,6 +5,7 @@
 // ve ChatGPT.app'i otomatik açma ekler. Bağımlılık yok, yalnızca Node >= 22.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import vm from "node:vm";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -224,8 +225,36 @@ function findInTree(text, query, { role, nth = 0 } = {}) {
   return { hit: best[nth] || null, candidates: scored.slice(0, 8) };
 }
 
+// ---------- servis hata kodları (Codex'in IPC kodları; anlamlı mesaj + ne yapmalı) ----------
+const SERVICE_ERRORS = {
+  "-10000": ["senderProcessNotAuthenticated", "İstemci imzalı başlatıcı olmadan açılmış; köprü/sarmalayıcı üzerinden kaydet."],
+  "-10005": ["unknownError / app-server exited", "ChatGPT.app veya codex app-server kapalı; sarmalayıcı uygulamayı açmayı dener."],
+  "-10006": ["appNotAllowed", "Uygulama kuruluş politikasıyla engelli; başka uygulama seç."],
+  "-10007": ["runningApplicationNotFound", "Uygulama bulunamadı; list_apps ile adı/bundle id'yi doğrula."],
+  "-10008": ["accessibilityError", "Erişilebilirlik ağacı okunamadı; pencereyi öne getir veya koordinatla devam et."],
+  "-10009": ["permissionsNotGranted", "macOS Erişilebilirlik/Ekran Kaydı izni yok; Sistem Ayarları > Gizlilik'ten ver."],
+  "-10010": ["invalidApp", "Geçersiz uygulama tanımı."],
+  "-10011": ["noActiveSession", "Oturum yok; get_app_state ile yeniden başlat."],
+  "-10012": ["userStoppedSession", "Kullanıcı Esc ile Computer Use'u durdurdu; döngüyü bitir, kullanıcı isteyince devam et."],
+  "-10013": ["incompatibleClientVersion", "İstemci/servis sürümleri uyumsuz; ChatGPT.app'i güncelle."],
+  "-10014": ["permissionsPending", "İzin isteği bekliyor; kullanıcı onaylasın."],
+  "-10015": ["blockedURL", "URL engelli."],
+  "-10016": ["userIntervened", "Kullanıcı araya girdi (fare/klavye); durumu yeniden oku, sonra devam et."],
+  "-10018": ["ambiguousApp", "Birden çok uygulama eşleşti; bundle id kullan (list_apps)."],
+  "-10020": ["screenLocked", "Ekran kilitli; kilidi aç."],
+};
+function annotateServiceError(result) {
+  const t = resultText(result);
+  const m = t.match(/server error (-\d{5})/);
+  if (!m || !SERVICE_ERRORS[m[1]]) return result;
+  const [name, hint] = SERVICE_ERRORS[m[1]];
+  return { ...result, isError: true, content: [...(result.content || []), { type: "text", text: `[${name}] ${hint}` }] };
+}
+const STOP_CODES = /server error -1001[26]\b/; // kullanıcı durdurdu / araya girdi → döngüleri kes
+
 // ---------- servis/uygulama sağlığı ----------
-const SERVICE_DOWN = /-10005|app-server exited|Sender process is not authenticated/;
+// -10005 "unknownError" genel koddur: yalnızca app-server kapalıyken uygulamayı aç; "timeoutReached" gibi alt türlerde açma.
+const SERVICE_DOWN = /app-server exited|Sender process is not authenticated|-10005(?!: ?timeout)/;
 let launchingApp = null;
 async function ensureCodexAppRunning() {
   if (launchingApp) return launchingApp;
@@ -251,7 +280,7 @@ async function callUpstream(name, args) {
     if (await ensureCodexAppRunning()) r = await attempt();
     if (SERVICE_DOWN.test(resultText(r))) r.content.push({ type: "text", text: `Not: Codex Computer Use servisi ${CODEX_APP_NAME}.app açıkken çalışır; uygulama başlatılamadı veya servis gelmedi.` });
   }
-  return r;
+  return annotateServiceError(r);
 }
 
 // ---------- araç tanımları ----------
@@ -293,6 +322,30 @@ const EXTRA_TOOLS = [
         auto_recover: { type: "boolean", description: "Ağaç kökü takılı bir menüyse ve find orada bulamazsa önce menüyü kapatmayı dene (varsayılan true)." },
       },
       required: ["actions"],
+    },
+  },
+  {
+    name: "script",
+    description: `Codex'in cua_repl'ine denk kalıcı JavaScript ortamı: kod yerelde çalışır, tıklama başına model turu olmaz. Ortam çağrılar arasında korunur (değişkenler, fonksiyonlar). API:
+  const app = await cua.getApp("Freeform");          // uygulama nesnesi
+  await app.click(31) / app.click([x,y]) / app.click({find:"Choose File"});
+  await app.pressKey("Return"); await app.typeText("..."); await app.setValue(idx, "..."); await app.scroll(idx,"down",1); await app.drag([x1,y1],[x2,y2]); await app.secondary(idx,"Cancel");
+  const ax = await app.getAXState();                 // ağaç metni (modele GÖNDERİLMEZ, değişkende)
+  app.find(ax, "Draw with Pen") → indeks | null;  app.findAll(ax, /regex/) → [[idx, satır]...]
+  await app.waitFor("Window: \\"Open\\"", {timeout:4000, absent:false});
+  await sleep(ms); log("...")                        // log satırları sonuçta döner
+Sonuç: log + (final_state ise) son ağacın diff'i/tamamı + isteğe bağlı ekran görüntüsü. Örnek (kalemle çokgen): for (const p of pts) await app.click(p); await app.pressKey("Return"); await app.pressKey("Escape");`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "Çalıştırılacak JavaScript (top-level await serbest)." },
+        app: { type: "string", description: "final_state için uygulama (kodda cua.getApp kullanıldıysa otomatik)." },
+        timeout_ms: { type: "integer", minimum: 1000, maximum: 600000, description: "Varsayılan 120000." },
+        output: { type: "string", enum: ["full", "diff", "none"], description: "Son durum: diff (varsayılan), full veya none." },
+        include_screenshot: { type: "boolean" },
+        reset: { type: "boolean", description: "Ortamı sıfırla (önceki değişkenleri at)." },
+      },
+      required: ["code"],
     },
   },
   {
@@ -508,6 +561,7 @@ async function runAction(defaultApp, action, state) {
       state.requeried = (state.requeried || 0) + 1;
     }
     if (looksLikeTree(t)) state.lastTree = t;
+    if (STOP_CODES.test(t)) return { result: last, error: "kullanıcı Computer Use'u durdurdu/araya girdi; batch kesildi — " + t.slice(0, 160) };
     if (isSoftError(last)) return { result: last, error: t.slice(0, 200) };
     if (n > 1 && i < n - 1) await sleep(KEY_DELAY_MS);
   }
@@ -599,8 +653,83 @@ async function openPathInDialog(app, args, state) {
   return { ok: sel.ok, last, log };
 }
 
+// ---------- script ortamı (cua_repl benzeri) ----------
+let scriptCtx = null;
+function makeApp(appName, state) {
+  const call = async (tool, args) => {
+    const r = await callUpstream(tool, { app: appName, ...args });
+    const t = resultText(r);
+    if (looksLikeTree(t)) state.lastTree = t;
+    state.last = r;
+    if (/Re-query the latest state/i.test(t)) { const st = await callUpstream("get_app_state", { app: appName }); state.lastTree = resultText(st); return call(tool, args); }
+    if (r.isError || /server error/i.test(t.slice(0, 120))) { const e = new Error(t.slice(0, 300)); e.stop = STOP_CODES.test(t); throw e; }
+    state.actions = (state.actions || 0) + 1;
+    return t;
+  };
+  const resolve = async (target) => {
+    if (target && typeof target === "object" && !Array.isArray(target) && target.find) {
+      let tree = state.lastTree; let hit = tree && findInTree(tree, target.find, { role: target.role, nth: target.nth }).hit;
+      if (!hit) { tree = await call("get_app_state", {}); hit = findInTree(tree, target.find, { role: target.role, nth: target.nth }).hit; }
+      if (!hit) throw new Error(`'${target.find}' ağaçta bulunamadı`);
+      return { element_index: hit.index };
+    }
+    if (Array.isArray(target)) return { x: target[0], y: target[1] };
+    return { element_index: String(target) };
+  };
+  return {
+    name: appName,
+    click: async (target, opts = {}) => call("click", { ...(await resolve(target)), ...opts }),
+    pressKey: (key) => call("press_key", { key }),
+    typeText: (text) => call("type_text", { text }),
+    setValue: async (target, value) => call("set_value", { ...(await resolve(target)), value }),
+    scroll: async (target, direction, pages = 1) => call("scroll", { ...(await resolve(target)), direction, pages }),
+    drag: (a, b) => call("drag", { from_x: a[0], from_y: a[1], to_x: b[0], to_y: b[1] }),
+    secondary: async (target, action) => call("perform_secondary_action", { ...(await resolve(target)), action }),
+    selectText: async (target, text, extra = {}) => call("select_text", { ...(await resolve(target)), text, ...extra }),
+    getAXState: () => call("get_app_state", {}),
+    getAXStateAndScreenshot: async () => { await call("get_app_state", {}); state.wantShotAtEnd = true; return state.lastTree; },
+    find: (tree, query, opts = {}) => { const h = findInTree(tree, query, opts).hit; return h ? Number(h.index) : null; },
+    findAll: (tree, query, opts = {}) => findInTree(tree, query, opts).candidates.map((c) => [Number(c.index), c.rest]),
+    waitFor: async (text, { timeout = 4000, absent = false } = {}) => { const w = await waitFor(appName, { text, timeout_ms: timeout, absent }, state); if (!w.ok) throw new Error(w.error); return state.lastTree; },
+  };
+}
+async function runScript(args) {
+  const state = { lastTree: null, last: null, apps: new Set(), logs: [], wantShotAtEnd: false };
+  if (args.reset || !scriptCtx) {
+    scriptCtx = vm.createContext({ console: { log: (...a) => state.logs.push(a.map(String).join(" ")) }, Math, JSON, Array, Object, String, Number, RegExp, Set, Map, Promise, Date, Error, setTimeout, clearTimeout });
+  }
+  // her çağrıda taze bağlar: state değişir
+  scriptCtx.cua = {
+    getApp: async (name) => { state.apps.add(name); const app = makeApp(name, state); state.lastTree = await app.getAXState(); if (!state.firstTree) state.firstTree = state.lastTree; return app; },
+    listApps: async () => resultText(await callUpstream("list_apps", {})),
+  };
+  scriptCtx.sleep = sleep;
+  scriptCtx.log = (...a) => state.logs.push(a.map(String).join(" "));
+  scriptCtx.__state = state;
+  const t0 = Date.now();
+  let error = null;
+  try {
+    const fn = vm.runInContext(`(async () => { ${args.code}\n })`, scriptCtx, { timeout: 5000 }); // derleme
+    await Promise.race([fn(), sleep(args.timeout_ms ?? 120000).then(() => { throw new Error(`script zaman aşımı (${args.timeout_ms ?? 120000} ms)`); })]);
+  } catch (e) { error = e?.message || String(e); }
+  const appName = args.app || [...state.apps][0];
+  const header = [`script: ${error ? "HATA: " + error : "ok"} (${Date.now() - t0} ms, ${state.actions || 0} eylem)`, ...state.logs.map((l) => `  ${l}`)].join("\n");
+  const output = args.output || "diff";
+  const wantShot = args.include_screenshot || state.wantShotAtEnd;
+  if (output === "none" || !appName) return { content: [{ type: "text", text: header }], isError: !!error || undefined };
+  const before = state.lastTree; // kod başında alınan ağaç
+  const last = await callUpstream("get_app_state", { app: appName });
+  const after = resultText(last);
+  let body;
+  if (output === "diff") body = `[diff]\n${looksLikeTree(after) ? diffText(state.firstTree || before, after) : after.slice(0, 1500)}`;
+  else body = after;
+  const shot = wantShot ? (await shrinkScreenshot(last)).content.filter((c) => c.type !== "text") : [];
+  return withNotes({ content: [{ type: "text", text: `${header}\n\n${body}` }, ...shot], isError: !!error || undefined }, appName);
+}
+
 // ---------- araç çağrısı ----------
 async function callTool(name, rawArgs) {
+  if (name === "script") { await ensureUpstream(); return runScript(rawArgs || {}); }
   await ensureUpstream();
   const args = { ...(rawArgs || {}) };
   const wantShot = args.include_screenshot ?? DEFAULT_SCREENSHOT;

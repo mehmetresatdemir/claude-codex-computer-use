@@ -29,6 +29,7 @@ Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_app
 | `include_screenshot` on every tool, **default off**; when on, the JPEG is downscaled with `sips` to 1280 px and the original size + multiplier is appended | 159 KB → ~3 KB (off) / ~125 KB (on) |
 | **`output: "diff"`** on `batch`/`run_macro` — window line + lines added/removed since the batch started (index-independent) + focus line; `compact` hides scroll bars, arrow buttons, handles and other noise | tens of lines instead of the whole tree; surprises (e.g. a Quick Look window) show up on the first line |
 | **`type_text` + `find`** — find the field by name, click to focus, type | no separate focus step |
+| **`script`** — a persistent JavaScript environment modelled on Codex's `cua_repl`: `cua.getApp`, `app.click(idx | [x,y] | {find})`, `pressKey`, `getAXState()` (tree stays in a variable, never sent to the model), `find`, `waitFor`; only a final diff goes back | loops/regex/conditions with zero model turns per click; the 80-edge penteract in one call (`examples/scripts/freeform_penteract.js`) |
 | **Conditional actions** `if_present` / `if_absent` / `optional` — run a step only if a text is (not) in the last tree; `optional` skips on error | branching flows in one macro (TextEdit: click "New Document" if the Open panel is up, else ⌘N) |
 | **`batch.dry_run`** — resolve every `find` against the current tree without acting | catches wrong role/title names before running |
 | **`batch.params` + `save_as`** — run with real values for `{{placeholders}}`, save the successful batch as a macro template | try once, then `run_macro` |
@@ -171,13 +172,15 @@ Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmas�
 | `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. Açıkken görüntü `sips` ile **1280 px'e küçültülür** (JPEG kalite 70), orijinal çözünürlük ve çarpan metne yazılır. | 159 KB → ~3 KB (kapalı) / ~125 KB → küçültülmüş |
 | **`output: "diff"`** (`batch`, `run_macro`) | Tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız) + odak satırı. `compact` (varsayılan) kaydırma çubuğu/ok düğmesi/tutamaç gibi gürültüyü gizler. | Yanıt onlarca satıra iner; beklenmedik pencereler (ör. Quick Look) anında görünür |
 | **`type_text` + `find`** | Alanı adıyla bul, tıklayıp odakla, yaz: `{"tool":"type_text","find":"First Text View","args":{"text":"…"}}`. | Odaklama için ayrı adım yok |
+| **`script`** — Codex'in `cua_repl`'i gibi kalıcı JS ortamı | `const app = await cua.getApp("Freeform"); for (const p of pts) await app.click(p); await app.pressKey("Return")` — ağaç `app.getAXState()` ile değişkende kalır, modele yalnızca sonda diff gider. | Döngü, regex, koşul; tıklama başına model turu yok. 80 kenarlı penterakt tek çağrıda (`examples/scripts/freeform_penteract.js`) |
 | **Koşullu eylemler** `if_present` / `if_absent` / `optional` | Son ağaçta metin varsa/yoksa çalıştır; `optional` hata verirse atla. Ör. Open paneli varsa "New Document"a tıkla, yoksa ⌘N. | Dallanan akışlar tek makroda |
 | **`batch.dry_run`** | Hiçbir eylem yapmadan `find` hedeflerinin şu anki ağaçta hangi indekse çözüleceğini göster. | Yanlış rol/başlık adını çalıştırmadan yakalar |
 | **`batch.params` + `save_as`** | `{{ad}}` yer tutucuları gerçek değerlerle çalışır; başarılı batch şablon olarak makroya kaydedilir. | Bir kez dene, sonra `run_macro` |
 | **`screenshot`** | `region=[x0,y0,x1,y1]` ile kırp, `max_px` ile boyutla; küçük yazıları okumak için. | Koordinatla tıklamanın tamamlayıcısı |
 | **`status`** | Sürüm, ChatGPT.app / app-server / servis / istemci, `list_apps` ping, makro ve not dosyaları. | Tek çağrıda teşhis |
 | **Adım süreleri + hatada görüntü** | Günlükte her adımın ms'si ve toplam; bir adım durursa (`screenshot_on_error`) küçültülmüş görüntü otomatik eklenir. | Kıyaslama ve teşhis bedava |
-| **Uygulama notları** | Uygulamaya özel bilinen tuzaklar sonuçlara bir kez iliştirilir (yerleşik Freeform notları; `~/.codex-cua-plus/notes.json` ile genişletilir). | Model aynı tuzağa ikinci kez düşmez |
+| **Uygulama notları** | Uygulamaya özel bilinen tuzaklar sonuçlara bir kez iliştirilir (yerleşik Freeform/TextEdit notları; `~/.codex-cua-plus/notes.json` ile genişletilir). | Model aynı tuzağa ikinci kez düşmez |
+| **Servis hata kodları** | Codex IPC kodları (−10000…−10020) ad + ne yapmalı ile açıklanır; kullanıcı Esc'e basınca (−10012) veya araya girince (−10016) batch/script döngüleri durur. `-10005` ayrımı: `app-server exited` → ChatGPT.app açılır, `timeoutReached` → açılmaz. | Hata mesajı eyleme dönüşür |
 | **Makrolar** `save_macro` / `run_macro` / `list_macros` | Başarılı bir eylem listesini isimle sakla (`~/.codex-cua-plus/macros.json`), `{{param}}` ile parametreleyip tek çağrıda çalıştır. `open_path_in_dialog` ve `recover` de eylem olarak girebilir. Örnek: `examples/macros/freeform_insert.json`. | Tekrarlayan iş = 1 çağrı |
 | **`recover`** + `batch.auto_recover` | Ağaç kökü açık/takılı menüyse: Escape → menünün Cancel eylemi → başlık çubuğuna koordinatla tıklama; her adım doğrulanır. `batch` içinde `find` menüde bulamazsa otomatik devreye girer. | Takılı menü elle müdahale istemez |
 | `press_key.repeat` | Aynı tuşu N kez (ör. 15× `shift+Down`). | 15 tur → 1 |
@@ -199,6 +202,8 @@ Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 | aynı makro, Return ile onay + son okuma atlama (v0.4.1) | **1** | **5,4 sn** |
 
 \* v0.2'de süre biraz daha uzun çünkü her adım doğrulanıyor (`wait_for`, listede seçim beklemesi, OK düğmesini ağaçtan bulma); karşılığında kör Return'ün ekleme yapmadan geçtiği durum ortadan kalktı. `menu` ile üçgen ekleme: 2,4 sn, 1 çağrı. `recover` ile açık menüyü kapatma: 1,9 sn.
+
+**Codex'in çizim reçetesi (oturum kayıtlarından öğrenildi):** Codex de Freeform'da sürükleme (çizgi uçlarını taşıma) ve HTML/SVG yapıştırmada başarısız oldu, sonra *Insert Shape → Draw with Pen → noktaları tıkla → Return → Escape* yolunu buldu ve bunu `cua_repl` içinde döngüyle koşturdu: 5 eksen vektörü, 32 köşe `n & (1<<i)` bit maskesiyle, ana yol Gray kodu (`n ^ (n>>1)`, 31 kenar tek çizgi), kalan kenarlar açgözlü yollar. Aynı reçete `script` aracıyla tek çağrıda çalışıyor (`examples/scripts/freeform_penteract.js`, sonuç `docs/ornek-penterakt-script.jpg`).
 
 Bir uyarı: `find` ile bir **resme/öğeye** tıklamak erişilebilirlik üzerinden AXPress gönderir; Freeform'da bu Quick Look açar, seçmez. Tuval öğesini seçmek için koordinatla tıkla veya menüden seçim yap. `output:"diff"` bu tür sürprizleri ilk satırda gösterir (`+ 0 window Quick Look`).
 
@@ -296,6 +301,7 @@ examples/freeform_insert_image.py  Claude'suz uçtan uca örnek (Python → sarm
 examples/draw_house.py             Pillow ile ev sahnesi
 examples/draw_sailboat.py          Pillow ile yelkenli sahnesi
 docs/gunluk-2026-10-01.md          günün adım adım kaydı (hatalar dahil)
+docs/codex-computer-use-mimarisi.md Codex Computer Use mimarisi: katmanlar, IPC, modelin sözleşmesi, hata kodları, tasarım kararlarımız
 docs/ornek-*.png                   Freeform'a eklenen örnek resimler
 ```
 

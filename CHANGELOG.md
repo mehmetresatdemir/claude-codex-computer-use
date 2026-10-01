@@ -1,5 +1,15 @@
 # Değişiklikler
 
+## 0.6.0 — 2026-10-02
+
+- **`script` aracı** — Codex'in `cua_repl`'ine denk kalıcı JavaScript ortamı (`node:vm`): `cua.getApp`, `app.click(idx | [x,y] | {find})`, `pressKey`, `typeText`, `setValue`, `scroll`, `drag`, `secondary`, `getAXState()` (ağaç modele gönderilmez, değişkende kalır), `find/findAll`, `waitFor`, `sleep`, `log`. Kod yerelde döngüyle çalışır; tıklama başına model turu yoktur. Sonuç: log + son ağacın diff'i (+ görüntü).
+- **Codex'in çizim reçetesi öğrenildi** (oturum kayıtlarından): Freeform'da sürükleme ve HTML/SVG yapıştırma çalışmaz; çalışan yol *Insert Shape → Draw with Pen → noktaları tıkla → Return → Escape*. 32 köşe bit maskesiyle, ana yol **Gray kodu** (31 kenar tek çizgi), kalan 49 kenar açgözlü yol ayrıştırması. `examples/scripts/freeform_penteract.js` bu reçeteyi tek `script` çağrısında uygular (17 yol, 80 kenar, ~3 dk); sonuç `docs/ornek-penterakt-script.jpg`.
+- Ölçüm: Codex REPL'de tıklama ≈ 0,7 s, bizde ≈ 1,2 s (her tıklamada köprüden tam ağaç + görüntü JSON'u geçiyor); model turu her ikisinde de sıfır.
+- **Mimari çözümleme**: `docs/codex-computer-use-mimarisi.md` — servis/IPC/istemci katmanları, modelin sözleşmesi (diff, emit, örtük bekleme, politika/onay, hata kodları), Codex'in çizim davranışı ve bizim tasarım kararlarımız.
+- **Servis hata kodları** anlamlandırıldı (`SERVICE_ERRORS`): −10000…−10020 için ad + ne yapmalı; `userStoppedSession`/`userIntervened` (−10012/−10016) batch ve script döngülerini keser.
+- `-10005` artık ikiye ayrılıyor: `app-server exited` → ChatGPT.app açılır; `timeoutReached` (ör. Safari'nin dev ağacı) → açma denenmez.
+- `script`: `cua.listApps()`, eylem sayacı.
+
 ## 0.5.0 — 2026-10-02
 
 - **`type_text` + `find`**: alanı adıyla bulur, önce tıklayıp odaklar, sonra yazar.
