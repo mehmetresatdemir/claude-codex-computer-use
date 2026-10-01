@@ -27,6 +27,9 @@ Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_app
 | **`menu`** — click a menu-bar path like `["Insert","Shape","Triangle"]`, skipping intermediate items when the target is already visible | 3 calls → 1 |
 | **`find_elements`** — return only matching tree lines | small replies |
 | `include_screenshot` on every tool, **default off**; when on, the JPEG is downscaled with `sips` to 1280 px and the original size + multiplier is appended | 159 KB → ~3 KB (off) / ~125 KB (on) |
+| **`output: "diff"`** on `batch`/`run_macro` — window line + lines added/removed since the batch started (index-independent) + focus line | tens of lines instead of the whole tree; surprises (e.g. a Quick Look window) show up on the first line |
+| **Macros** — `save_macro` / `run_macro` / `list_macros`; stored in `~/.codex-cua-plus/macros.json`, `{{param}}` placeholders filled at run time; `open_path_in_dialog` and `recover` can be steps | a recurring job = 1 call (Freeform insert: 6 steps, 6.8 s) |
+| **`recover`** + `batch.auto_recover` — if the tree root is an open/stuck menu: Escape → the menu's Cancel action → coordinate click on the title bar, each step verified; runs automatically inside `batch` when `find` misses in a menu tree | no manual intervention |
 | `press_key.repeat` | e.g. 15× `shift+Down` in one call |
 | `open_path_in_dialog` — ⌘⇧G → path → Return, waits for the file to be selected, then clicks the panel's OK button found in the tree | 5 calls → 1, no blind Return |
 | Auto-launch ChatGPT.app on `-10005 app-server exited`, retry once | no manual fix |
@@ -146,6 +149,9 @@ Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmas�
 | **`menu`** | `path:["Insert","Shape","Triangle"]` — menü çubuğundan yol tıklar. Codex menü ağacını iç içe verdiği için hedef görünür olunca ara adımları atlar. | 3 tur → 1 |
 | **`find_elements`** | Ağacın tamamını döndürmeden sorguyla eşleşen satırları verir. | Küçük yanıt |
 | `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. Açıkken görüntü `sips` ile **1280 px'e küçültülür** (JPEG kalite 70), orijinal çözünürlük ve çarpan metne yazılır. | 159 KB → ~3 KB (kapalı) / ~125 KB → küçültülmüş |
+| **`output: "diff"`** (`batch`, `run_macro`) | Tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız) + odak satırı. | Yanıt onlarca satıra iner; beklenmedik pencereler (ör. Quick Look) anında görünür |
+| **Makrolar** `save_macro` / `run_macro` / `list_macros` | Başarılı bir eylem listesini isimle sakla (`~/.codex-cua-plus/macros.json`), `{{param}}` ile parametreleyip tek çağrıda çalıştır. `open_path_in_dialog` ve `recover` de eylem olarak girebilir. Örnek: `examples/macros/freeform_insert.json`. | Tekrarlayan iş = 1 çağrı |
+| **`recover`** + `batch.auto_recover` | Ağaç kökü açık/takılı menüyse: Escape → menünün Cancel eylemi → başlık çubuğuna koordinatla tıklama; her adım doğrulanır. `batch` içinde `find` menüde bulamazsa otomatik devreye girer. | Takılı menü elle müdahale istemez |
 | `press_key.repeat` | Aynı tuşu N kez (ör. 15× `shift+Down`). | 15 tur → 1 |
 | `open_path_in_dialog` | Açık Aç/Kaydet panelinde ⌘⇧G → yol → Return; dosya adının listede **seçili** görünmesini bekler, sonra panelin OK düğmesini (`OKButton`) ağaçtan bulup tıklar (kör Return değil). | 5 tur → 1, deterministik |
 | Otomatik uygulama açma | `-10005 app-server exited` görünce `open -g -a ChatGPT` ile uygulamayı arka planda açar, servis gelince bir kez yeniden dener. | Elle müdahale yok |
@@ -160,9 +166,12 @@ Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 |---|---|---|
 | Elle, her adım ayrı çağrı | 7 | ~1 dk |
 | `batch` (indeksle) + `open_path_in_dialog` (v0.1) | 3 | 5,6 sn |
-| `batch` (**find** + **wait_for**) + `open_path_in_dialog` (v0.2) | **2** | 8,4 sn* |
+| `batch` (**find** + **wait_for**) + `open_path_in_dialog` (v0.2) | 2 | 8,4 sn* |
+| `run_macro("freeform_insert", {board, path})` (v0.3) | **1** | 6,8 sn |
 
-\* v0.2'de süre biraz daha uzun çünkü her adım doğrulanıyor (`wait_for`, listede seçim beklemesi, OK düğmesini ağaçtan bulma); karşılığında kör Return'ün ekleme yapmadan geçtiği durum ortadan kalktı. `menu` ile üçgen ekleme: 2,4 sn, 1 çağrı.
+\* v0.2'de süre biraz daha uzun çünkü her adım doğrulanıyor (`wait_for`, listede seçim beklemesi, OK düğmesini ağaçtan bulma); karşılığında kör Return'ün ekleme yapmadan geçtiği durum ortadan kalktı. `menu` ile üçgen ekleme: 2,4 sn, 1 çağrı. `recover` ile açık menüyü kapatma: 1,9 sn.
+
+Bir uyarı: `find` ile bir **resme/öğeye** tıklamak erişilebilirlik üzerinden AXPress gönderir; Freeform'da bu Quick Look açar, seçmez. Tuval öğesini seçmek için koordinatla tıkla veya menüden seçim yap. `output:"diff"` bu tür sürprizleri ilk satırda gösterir (`+ 0 window Quick Look`).
 
 Tek `batch` örneği (indeks bilmeden):
 
@@ -230,6 +239,7 @@ Python'dan doğrudan (Claude olmadan) sürmek için `examples/freeform_insert_im
 - **ChatGPT.app açık olmalı.** Kapanırsa `-10005: codex app-server exited before returning a response`. Sarmalayıcı uygulamayı açmayı dener; başaramazsa elle aç.
 - **Tuval sürüklemesi.** Freeform gibi uygulamalarda `drag` (ve tutamaçlara `set_value`) şekilleri **taşımaz**: uygulama sentetik, anlık sürüklemeyi yoksayıyor. Claude'un kendi Computer Use aracındaki `mouse_down/move/up` dizisi tam ekran modunda çalıştı. Pratik yol: resmi dosya olarak üretip `Insert > Choose File` ile eklemek (`examples/draw_*.py`).
 - **Takılı menü.** Bir akış menüyü açık bırakırsa Codex'in ağacı o menüde kalabilir; `Escape`/`Cancel` düzeltmedi, uygulamada gerçek bir boş-alan tıklaması düzeltti.
+- **Oturum sonu etkisi (gözlem).** Codex istemci oturumu kapandığında (köprü idle'a düşünce veya sarmalayıcı kapanınca) Freeform her seferinde panodan "All Boards" görünümüne döndü; Escape gönderiliyor gibi davranıyor. Bir sonraki çağrının ilk eylemi de "The user changed <app>. Re-query…" uyarısı alabiliyor; sarmalayıcı bunu yakalayıp durumu yeniden okur ve eylemi bir kez tekrarlar (`find` varsa indeksi yeniden çözer). Uzun işleri tek oturumda bitir, pencere/pano durumunu `wait_for` ile doğrula.
 - **Koordinatlar** orijinal ekran çözünürlüğündedir (ör. 2560×1300); ölçeklenmiş görüntüdeki piksel değil. Yanıt metnindeki çarpanı kullan.
 - Tek bir istemci oturumu kullan; aynı anda birden fazla köprü/istemci servisi karıştırabilir.
 
@@ -249,6 +259,7 @@ Python'dan doğrudan (Claude olmadan) sürmek için `examples/freeform_insert_im
 ```
 server.mjs                         sarmalayıcı MCP sunucusu (tek dosya)
 CHANGELOG.md                       sürüm notları
+examples/macros/freeform_insert.json örnek makro (save_macro girdisi)
 scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?

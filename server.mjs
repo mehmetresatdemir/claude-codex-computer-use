@@ -5,9 +5,12 @@
 // ve ChatGPT.app'i otomatik açma ekler. Bağımlılık yok, yalnızca Node >= 22.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+
+const MACRO_DIR = process.env.CUA_PLUS_MACRO_DIR || join(homedir(), ".codex-cua-plus");
+const MACRO_FILE = join(MACRO_DIR, "macros.json");
 
 const NPX = process.env.CUA_PLUS_NPX || "npx";
 const BRIDGE_ARGS = ["-y", "claude-codex-computer-use@latest"];
@@ -15,7 +18,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -128,6 +131,38 @@ function parseTree(text) {
   return rows;
 }
 function looksLikeTree(text) { return /^\s*0 /m.test(text); }
+// Ağacın kökü bir menü mü? (menü çubuğu öğesi açık: "0 Insert, Secondary Actions: Cancel, Pick" + "1 menu")
+function treeRootIsMenu(text) { return /^\s*0 [^\n]*Secondary Actions: Cancel, Pick/m.test(text || "") || /^\s*0 [^\n]*\n\s*1 menu\b/m.test(text || ""); }
+function windowLine(text) { return (text || "").match(/^Window: .*$/m)?.[0] || ""; }
+// İki ağaç arasındaki satır farkı (indeksler değişebileceği için indeks hariç karşılaştırılır).
+function treeDiff(before, after) {
+  const norm = (t) => parseTree(t || "").map((r) => r.rest);
+  const a = norm(before), b = norm(after);
+  const countA = new Map(), countB = new Map();
+  for (const x of a) countA.set(x, (countA.get(x) || 0) + 1);
+  for (const x of b) countB.set(x, (countB.get(x) || 0) + 1);
+  const removed = [], added = [];
+  for (const [x, n] of countA) { const d = n - (countB.get(x) || 0); for (let i = 0; i < d; i++) removed.push(x); }
+  for (const r of parseTree(after || "")) { const d = (countB.get(r.rest) || 0) - (countA.get(r.rest) || 0); if (d > 0) { added.push(`${r.index} ${r.rest}`); countB.set(r.rest, (countB.get(r.rest) || 0) - 1); } }
+  return { added, removed };
+}
+function diffText(before, after) {
+  const { added, removed } = treeDiff(before, after);
+  const focus = (after || "").match(/^The focused UI element is .*$/m)?.[0] || "";
+  return [windowLine(after), `+${added.length} satır, -${removed.length} satır`,
+    ...added.slice(0, 60).map((l) => `+ ${l}`), ...removed.slice(0, 30).map((l) => `- ${l}`),
+    added.length > 60 || removed.length > 30 ? "(kısaltıldı; tam ağaç için output:\"full\")" : "", focus].filter(Boolean).join("\n");
+}
+
+// ---------- makrolar ----------
+function loadMacros() { try { return JSON.parse(readFileSync(MACRO_FILE, "utf8")); } catch { return {}; } }
+function saveMacros(m) { mkdirSync(MACRO_DIR, { recursive: true }); writeFileSync(MACRO_FILE, JSON.stringify(m, null, 2)); }
+function substitute(value, params) {
+  if (typeof value === "string") return value.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => (params[k] !== undefined ? String(params[k]) : `{{${k}}}`));
+  if (Array.isArray(value)) return value.map((v) => substitute(v, params));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, substitute(v, params)]));
+  return value;
+}
 function findInTree(text, query, { role, nth = 0 } = {}) {
   const q = String(query);
   const isRe = q.length > 2 && q.startsWith("/") && q.lastIndexOf("/") > 0;
@@ -185,8 +220,8 @@ const ACTION_SCHEMA = {
   type: "object",
   description: "Tek eylem. 'tool' üst akış aracı ya da wait_for/sleep_ms. Hedef: args.element_index VEYA find.",
   properties: {
-    tool: { type: "string", enum: ["click", "set_value", "type_text", "press_key", "scroll", "drag", "select_text", "perform_secondary_action", "get_app_state", "wait_for", "sleep_ms"] },
-    args: { type: "object", description: "Üst akış argümanları (app verilmezse batch.app kullanılır). wait_for: {text, timeout_ms=4000, absent=false}. sleep_ms: {ms}." },
+    tool: { type: "string", enum: ["click", "set_value", "type_text", "press_key", "scroll", "drag", "select_text", "perform_secondary_action", "get_app_state", "wait_for", "sleep_ms", "open_path_in_dialog", "recover"] },
+    args: { type: "object", description: "Üst akış argümanları (app verilmezse batch.app kullanılır). wait_for: {text, timeout_ms=4000, absent=false}. sleep_ms: {ms}. open_path_in_dialog: {path, confirm=true}. recover: {}." },
     find: { type: "string", description: FIND_DESC },
     role: { type: "string", description: "find ile birlikte: satır bu rolle başlamalı (ör. 'button', 'menu item', 'text field')." },
     nth: { type: "integer", minimum: 0, description: "find birden çok eşleşirse kaçıncısı (0 = ilk)." },
@@ -205,9 +240,47 @@ const EXTRA_TOOLS = [
         actions: { type: "array", items: ACTION_SCHEMA, minItems: 1 },
         include_screenshot: { type: "boolean", description: `Son durumda ekran görüntüsü (varsayılan ${DEFAULT_SCREENSHOT}).` },
         final_state: { type: "boolean", description: "Sonda get_app_state çağır (varsayılan true)." },
+        output: { type: "string", enum: ["full", "diff"], description: "full: son ağacın tamamı (varsayılan). diff: pencere satırı + batch öncesine göre eklenen/silinen satırlar; çok daha küçük." },
+        auto_recover: { type: "boolean", description: "Ağaç kökü takılı bir menüyse ve find orada bulamazsa önce menüyü kapatmayı dene (varsayılan true)." },
       },
       required: ["actions"],
     },
+  },
+  {
+    name: "recover",
+    description: "Takılı/açık kalmış menüden kurtarır: Escape → menünün Cancel eylemi → pencere başlık çubuğuna koordinatla tıklama; her adımdan sonra ağaç kökünün menü olup olmadığını kontrol eder. Günlük döner.",
+    inputSchema: { type: "object", properties: { app: { type: "string" }, include_screenshot: { type: "boolean" } }, required: ["app"] },
+  },
+  {
+    name: "save_macro",
+    description: `Bir batch eylem listesini isimle kaydeder (${MACRO_FILE}). Dizelerde {{param}} yer tutucuları run_macro'da doldurulur. Aynı isim üzerine yazar.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" }, description: { type: "string" },
+        app: { type: "string", description: "Varsayılan uygulama (run_macro'da geçersiz kılınabilir)." },
+        actions: { type: "array", items: ACTION_SCHEMA, minItems: 1 },
+        params: { type: "array", items: { type: "string" }, description: "Beklenen parametre adları (belgeleme amaçlı)." },
+      },
+      required: ["name", "actions"],
+    },
+  },
+  {
+    name: "run_macro",
+    description: "Kaydedilmiş makroyu parametrelerle çalıştırır (batch gibi; yalnızca son durum döner).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" }, params: { type: "object", description: "{{param}} değerleri." },
+        app: { type: "string" }, include_screenshot: { type: "boolean" }, output: { type: "string", enum: ["full", "diff"] }, final_state: { type: "boolean" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "list_macros",
+    description: "Kayıtlı makroları (ad, açıklama, parametreler, adım sayısı) listeler.",
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "menu",
@@ -269,6 +342,31 @@ async function listTools() {
 
 // ---------- eylem çalıştırma ----------
 // lastTree: aynı çağrı içinde son görülen ağaç metni (find için). Her üst akış yanıtı ağaç içeriyorsa güncellenir.
+// Takılı menüden kurtarma: her adımdan sonra kök hâlâ menü mü diye bakar.
+async function recover(app, state) {
+  const log = [];
+  const check = async (label) => {
+    const st = await callUpstream("get_app_state", { app });
+    state.lastTree = resultText(st); state.lastResult = st;
+    const stuck = treeRootIsMenu(state.lastTree);
+    log.push(`${label}: ${stuck ? "kök hâlâ menü" : "kurtarıldı"}`);
+    return !stuck;
+  };
+  if (await check("başlangıç")) return { ok: true, log };
+  await callUpstream("press_key", { app, key: "Escape" });
+  if (await check("Escape")) return { ok: true, log };
+  const menuEl = parseTree(state.lastTree).find((r) => /^menu\b/.test(r.rest) && /Cancel/.test(r.rest)) || parseTree(state.lastTree)[0];
+  if (menuEl) { await callUpstream("perform_secondary_action", { app, element_index: menuEl.index, action: "Cancel" }); if (await check(`Cancel [${menuEl.index}]`)) return { ok: true, log }; }
+  // Son çare: pencere başlık çubuğunun ortasına tıkla (ekran görüntüsü boyutundan).
+  const img = (state.lastResult?.content || []).find((c) => c.type === "image");
+  if (img) {
+    const dir = mkdtempSync(join(tmpdir(), "cua-plus-")); const f = join(dir, "s.jpg");
+    try { writeFileSync(f, Buffer.from(img.data, "base64")); const sz = await imageSize(f); if (sz) { await callUpstream("click", { app, x: Math.round(sz.w / 2), y: 12 }); if (await check(`başlık çubuğu tıklaması (${Math.round(sz.w / 2)},12)`)) return { ok: true, log }; } }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+  return { ok: false, log };
+}
+
 async function resolveTarget(app, action, state) {
   if (!action.find) return { ok: true };
   let tree = state.lastTree && looksLikeTree(state.lastTree) ? state.lastTree : null;
@@ -277,6 +375,11 @@ async function resolveTarget(app, action, state) {
     const st = await callUpstream("get_app_state", { app });
     state.lastTree = resultText(st);
     res = findInTree(state.lastTree, action.find, { role: action.role, nth: action.nth });
+  }
+  if (!res.hit && state.autoRecover !== false && treeRootIsMenu(state.lastTree)) {
+    const rec = await recover(app, state);
+    state.recoverLog = (state.recoverLog || []).concat(rec.log.map((l) => `recover: ${l}`));
+    if (rec.ok) res = findInTree(state.lastTree, action.find, { role: action.role, nth: action.nth });
   }
   if (!res.hit) {
     const cands = res.candidates.map((c) => `  ${c.index} ${c.rest}`).join("\n");
@@ -307,6 +410,14 @@ async function runAction(defaultApp, action, state) {
     const w = await waitFor(app, args, state);
     return w.ok ? { result: w.result, note: `'${args.text}' ${args.absent ? "gitti" : "göründü"}` } : { result: w.result, error: w.error };
   }
+  if (action.tool === "open_path_in_dialog") {
+    const r = await openPathInDialog(app, args, state);
+    return r.ok ? { result: r.last, note: r.log.join("; ") } : { result: r.last, error: r.log.join("; ") };
+  }
+  if (action.tool === "recover") {
+    const r = await recover(app, state);
+    return r.ok ? { result: state.lastResult, note: r.log.join("; ") } : { result: state.lastResult, error: r.log.join("; ") };
+  }
   const target = await resolveTarget(app, action, state);
   if (!target.ok) return { result: null, error: target.error };
   if (target.index !== undefined) args.element_index = target.index;
@@ -315,7 +426,14 @@ async function runAction(defaultApp, action, state) {
   let last;
   for (let i = 0; i < n; i++) {
     last = await callUpstream(action.tool, args);
-    const t = resultText(last);
+    let t = resultText(last);
+    // "The user changed <app>. Re-query…": durumu yeniden okuyup eylemi bir kez tekrarla (find varsa indeksi yeniden çöz).
+    if (/Re-query the latest state/i.test(t)) {
+      const st = await callUpstream("get_app_state", { app }); state.lastTree = resultText(st);
+      if (action.find) { const tg = await resolveTarget(app, action, state); if (!tg.ok) return { result: st, error: tg.error }; if (tg.index !== undefined) args.element_index = tg.index; }
+      last = await callUpstream(action.tool, args); t = resultText(last);
+      state.requeried = (state.requeried || 0) + 1;
+    }
     if (looksLikeTree(t)) state.lastTree = t;
     if (isSoftError(last)) return { result: last, error: t.slice(0, 200) };
     if (n > 1 && i < n - 1) await sleep(KEY_DELAY_MS);
@@ -323,14 +441,16 @@ async function runAction(defaultApp, action, state) {
   return { result: last, note: target.line ? `→ [${target.index}] ${target.line.slice(0, 60)}` : undefined };
 }
 
-async function runBatch(app, actions, { finalState = true } = {}) {
-  const state = { lastTree: null };
+async function runBatch(app, actions, { finalState = true, autoRecover = true, captureBefore = false } = {}) {
+  const state = { lastTree: null, autoRecover };
   const log = [];
-  let last = null;
+  let last = null, before = null;
+  if (captureBefore && app) { const st = await callUpstream("get_app_state", { app }); before = resultText(st); state.lastTree = before; }
   for (const [i, a] of (actions || []).entries()) {
     const label = `${i + 1}. ${a.tool}${a.repeat > 1 ? `×${a.repeat}` : ""}${a.find ? ` find="${a.find}"` : ""}`;
     try {
       const r = await runAction(app, a, state);
+      if (state.recoverLog?.length) { log.push(...state.recoverLog); state.recoverLog = []; }
       if (r.result) last = r.result;
       if (r.error) { log.push(`${label} HATA: ${r.error}`); break; }
       log.push(`${label} ok${r.note ? ` ${r.note}` : ""}`);
@@ -340,7 +460,47 @@ async function runBatch(app, actions, { finalState = true } = {}) {
     const st = await callUpstream("get_app_state", { app });
     if (!isSoftError(st) || !last) last = st;
   }
-  return { last, log };
+  return { last, log, before };
+}
+// batch benzeri sonuçları ortak biçimde paketle (full / diff).
+async function packBatch(title, { last, log, before }, { wantShot, output }) {
+  const result = last || { content: [] };
+  if (output === "diff") {
+    const after = resultText(result);
+    const shot = wantShot ? (await shrinkScreenshot(result)).content.filter((c) => c.type !== "text") : [];
+    return { content: [{ type: "text", text: `${title}:\n${log.join("\n")}\n\n[diff]\n${looksLikeTree(after) ? diffText(before, after) : after.slice(0, 1500)}` }, ...shot] };
+  }
+  const out = await finish(result, wantShot);
+  return { ...out, content: [{ type: "text", text: `${title}:\n${log.join("\n")}` }, ...(out.content || [])] };
+}
+
+// Aç/Kaydet panelinde ⌘⇧G ile yola gider, dosya seçimini bekler, OK düğmesini ağaçtan tıklar.
+async function openPathInDialog(app, args, state) {
+  const log = [];
+  await callUpstream("press_key", { app, key: "super+shift+g" });
+  const w = await waitFor(app, { text: "PathTextField", timeout_ms: 3000 }, state);
+  if (!w.ok) return { ok: false, last: w.result, log: ["Go to Folder alanı açılmadı; bir Aç/Kaydet paneli açık mı?"] };
+  const m = state.lastTree.match(/^\s*(\d+) text field .*PathTextField/m);
+  await callUpstream("set_value", { app, element_index: m[1], value: args.path });
+  await sleep(150);
+  await callUpstream("press_key", { app, key: "Return" });
+  const base = String(args.path).replace(/\/+$/, "").split("/").pop();
+  await waitFor(app, { text: "PathTextField", timeout_ms: 3000, absent: true }, state);
+  const sel = await waitFor(app, { text: `Value: ${base}`, timeout_ms: 3000 }, state);
+  log.push(`go-to: ${sel.ok ? `'${base}' listede` : `'${base}' listede görünmedi`}`);
+  let last = sel.result;
+  if (args.confirm !== false && sel.ok) {
+    const ok = findInTree(state.lastTree, "/\\bOKButton\\b/", {}).hit || findInTree(state.lastTree, "/^button (Insert|Open|Save|Choose)\\b/", {}).hit;
+    if (ok && !/\(disabled\)/.test(ok.rest)) {
+      last = await callUpstream("click", { app, element_index: ok.index });
+      log.push(`confirm: [${ok.index}] ${ok.rest.slice(0, 40)}`);
+      await waitFor(app, { text: "open-panel", timeout_ms: 3000, absent: true }, state);
+    } else { last = await callUpstream("press_key", { app, key: "Return" }); log.push("confirm: Return (düğme bulunamadı)"); }
+    await sleep(300);
+  }
+  last = await callUpstream("get_app_state", { app });
+  state.lastTree = resultText(last);
+  return { ok: sel.ok, last, log };
 }
 
 // ---------- araç çağrısı ----------
@@ -351,9 +511,38 @@ async function callTool(name, rawArgs) {
   delete args.include_screenshot;
 
   if (name === "batch") {
-    const { last, log } = await runBatch(args.app, args.actions, { finalState: args.final_state !== false });
-    const out = await finish(last || { content: [] }, wantShot);
-    return { ...out, content: [{ type: "text", text: `batch:\n${log.join("\n")}` }, ...(out.content || [])] };
+    const res = await runBatch(args.app, args.actions, { finalState: args.final_state !== false, autoRecover: args.auto_recover !== false, captureBefore: args.output === "diff" });
+    return packBatch("batch", res, { wantShot, output: args.output });
+  }
+
+  if (name === "recover") {
+    const state = { lastTree: null };
+    const r = await recover(args.app, state);
+    const out = await finish(state.lastResult || { content: [] }, wantShot);
+    return { ...out, content: [{ type: "text", text: `recover ${r.ok ? "başarılı" : "BAŞARISIZ"}:\n${r.log.join("\n")}` }, ...(out.content || [])] };
+  }
+
+  if (name === "save_macro") {
+    const macros = loadMacros();
+    macros[args.name] = { description: args.description || "", app: args.app, params: args.params || [], actions: args.actions, saved_at: new Date().toISOString() };
+    saveMacros(macros);
+    return { content: [{ type: "text", text: `Makro kaydedildi: ${args.name} (${args.actions.length} adım) → ${MACRO_FILE}` }] };
+  }
+  if (name === "list_macros") {
+    const macros = loadMacros();
+    const rows = Object.entries(macros).map(([n, m]) => `- ${n}: ${m.description || "(açıklama yok)"} | app=${m.app || "-"} | params=${(m.params || []).join(",") || "-"} | ${m.actions.length} adım`);
+    return { content: [{ type: "text", text: rows.length ? rows.join("\n") : `Kayıtlı makro yok (${MACRO_FILE}).` }] };
+  }
+  if (name === "run_macro") {
+    const macro = loadMacros()[args.name];
+    if (!macro) return { content: [{ type: "text", text: `Makro yok: ${args.name}` }], isError: true };
+    const params = args.params || {};
+    const missing = (macro.params || []).filter((k) => params[k] === undefined);
+    if (missing.length) return { content: [{ type: "text", text: `Eksik parametre: ${missing.join(", ")}` }], isError: true };
+    const actions = substitute(macro.actions, params);
+    const app = args.app || macro.app;
+    const res = await runBatch(app, actions, { finalState: args.final_state !== false, captureBefore: args.output === "diff" });
+    return packBatch(`run_macro ${args.name}`, res, { wantShot, output: args.output });
   }
 
   if (name === "menu") {
@@ -389,37 +578,10 @@ async function callTool(name, rawArgs) {
   }
 
   if (name === "open_path_in_dialog") {
-    const app = args.app;
     const state = { lastTree: null };
-    await callUpstream("press_key", { app, key: "super+shift+g" });
-    const w = await waitFor(app, { text: "PathTextField", timeout_ms: 3000 }, state);
-    if (!w.ok) return { content: [{ type: "text", text: "Go to Folder alanı açılmadı; bir Aç/Kaydet paneli açık mı?" }], isError: true };
-    const m = state.lastTree.match(/^\s*(\d+) text field .*PathTextField/m);
-    await callUpstream("set_value", { app, element_index: m[1], value: args.path });
-    await sleep(150);
-    await callUpstream("press_key", { app, key: "Return" });
-    // Yola gidildi mi: Go To sheet kapanmalı ve dosya adı listede seçili görünmeli.
-    const base = args.path.replace(/\/+$/, "").split("/").pop();
-    await waitFor(app, { text: "PathTextField", timeout_ms: 3000, absent: true }, state);
-    const sel = await waitFor(app, { text: `Value: ${base}`, timeout_ms: 3000 }, state);
-    const log = [`go-to: ${sel.ok ? `'${base}' listede` : `'${base}' listede görünmedi`}`];
-    let last = sel.result;
-    if (args.confirm !== false && sel.ok) {
-      // Panelin varsayılan düğmesi (Insert/Open/Save, ID: OKButton) — kör Return yerine ağaçtan bul.
-      const ok = findInTree(state.lastTree, "/\\bOKButton\\b/", {}).hit || findInTree(state.lastTree, "/^button (Insert|Open|Save|Choose)\\b/", {}).hit;
-      if (ok && !/\(disabled\)/.test(ok.rest)) {
-        last = await callUpstream("click", { app, element_index: ok.index });
-        log.push(`confirm: [${ok.index}] ${ok.rest.slice(0, 40)}`);
-        await waitFor(app, { text: "open-panel", timeout_ms: 3000, absent: true }, state);
-      } else {
-        last = await callUpstream("press_key", { app, key: "Return" });
-        log.push("confirm: Return (düğme bulunamadı)");
-      }
-      await sleep(300);
-    }
-    last = await callUpstream("get_app_state", { app });
-    const out = await finish(last, wantShot);
-    return { ...out, content: [{ type: "text", text: `open_path_in_dialog:\n${log.join("\n")}` }, ...(out.content || [])] };
+    const r = await openPathInDialog(args.app, args, state);
+    const out = await finish(r.last || { content: [] }, wantShot);
+    return { ...out, isError: !r.ok || undefined, content: [{ type: "text", text: `open_path_in_dialog:\n${r.log.join("\n")}` }, ...(out.content || [])] };
   }
 
   if (TARGETABLE.has(name) && args.find) {

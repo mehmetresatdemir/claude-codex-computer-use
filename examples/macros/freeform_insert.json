@@ -1,0 +1,14 @@
+{
+  "name": "freeform_insert",
+  "description": "Freeform'da adı verilen panoyu açar ve bir dosyayı Insert > Choose File ile ekler.",
+  "app": "Freeform",
+  "params": ["board", "path"],
+  "actions": [
+    { "tool": "click", "find": "Board: {{board}}", "role": "button" },
+    { "tool": "wait_for", "args": { "text": "Window: \"{{board}}\"" } },
+    { "tool": "click", "find": "Insert" },
+    { "tool": "click", "find": "Choose File" },
+    { "tool": "wait_for", "args": { "text": "Window: \"Open\"" } },
+    { "tool": "open_path_in_dialog", "args": { "path": "{{path}}" } }
+  ]
+}
