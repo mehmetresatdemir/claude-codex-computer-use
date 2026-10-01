@@ -2,6 +2,8 @@
 
 **Codex'in (ChatGPT.app) yerel Computer Use motorunu Claude Code'dan, Codex kotası harcamadan ve toplu komutlarla kullanmak.**
 
+> Ad benzerliği: bu depo, altta kullandığı [songkeys/claude-codex-computer-use](https://github.com/songkeys/claude-codex-computer-use) köprüsünden **ayrıdır**; köprüyü değiştirmez, önüne `codex-cua-plus` adlı sarmalayıcıyı ve ölçümleri ekler. Sarmalayıcının dosya/araç adı `codex-cua-plus` olarak kalır.
+
 <details>
 <summary><b>English summary</b> (the rest of this README is in Turkish)</summary>
 
@@ -33,8 +35,8 @@ Real task (Freeform: open board → Insert → Choose File → go to path → in
 Requires macOS 14.4+, ChatGPT.app with Computer Use installed **and running**, Node ≥ 22.14, Claude Code.
 
 ```bash
-git clone https://github.com/mehmetresatdemir/claude-codex-cua-plus.git
-cd claude-codex-cua-plus && ./scripts/install.sh   # finds paths, registers the MCP server as codex-computer-use
+git clone https://github.com/mehmetresatdemir/claude-codex-computer-use.git
+cd claude-codex-computer-use && ./scripts/install.sh   # finds paths, registers the MCP server as codex-computer-use
 ```
 Then start a new Claude Code session. Tools appear as `mcp__codex-computer-use__*`.
 
@@ -151,8 +153,8 @@ Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 Gereksinimler: macOS 14.4+, **ChatGPT.app (Codex) kurulu ve açık**, Node ≥ 22.14 (nvm ile `nvm install 22`; v22.20.0 ile test edildi), Claude Code 2.1.2xx+.
 
 ```bash
-git clone https://github.com/mehmetresatdemir/claude-codex-cua-plus.git
-cd claude-codex-cua-plus
+git clone https://github.com/mehmetresatdemir/claude-codex-computer-use.git
+cd claude-codex-computer-use
 ./scripts/install.sh
 ```
 
