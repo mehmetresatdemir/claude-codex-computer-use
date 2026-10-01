@@ -22,13 +22,17 @@ Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_app
 | Feature | Effect |
 |---|---|
 | `batch` — run a list of actions, return only the final state | N round-trips → 1 |
-| `include_screenshot` on every tool, **default off** | 159 KB → ~3 KB per reply |
+| **`find`** — target elements by text instead of `element_index` (`{"tool":"click","find":"Choose File"}`); exact > word > substring, `/regex/`, `role`, `nth`; re-reads the tree once if not found and lists near candidates | whole flows in one `batch` without knowing indices |
+| **`wait_for`** — poll until a text appears in (or disappears from) the tree | deterministic instead of blind sleeps |
+| **`menu`** — click a menu-bar path like `["Insert","Shape","Triangle"]`, skipping intermediate items when the target is already visible | 3 calls → 1 |
+| **`find_elements`** — return only matching tree lines | small replies |
+| `include_screenshot` on every tool, **default off**; when on, the JPEG is downscaled with `sips` to 1280 px and the original size + multiplier is appended | 159 KB → ~3 KB (off) / ~125 KB (on) |
 | `press_key.repeat` | e.g. 15× `shift+Down` in one call |
-| `open_path_in_dialog` — ⌘⇧G → path → Return (→ Return) in any Open/Save panel | 5 calls → 1 |
+| `open_path_in_dialog` — ⌘⇧G → path → Return, waits for the file to be selected, then clicks the panel's OK button found in the tree | 5 calls → 1, no blind Return |
 | Auto-launch ChatGPT.app on `-10005 app-server exited`, retry once | no manual fix |
 | Idle timeout 60 s → 10 min; clean SIGTERM shutdown of the child tree | no cold starts, no orphans |
 
-Real task (Freeform: open board → Insert → Choose File → go to path → insert → delete copy): 7 model turns by hand → **5.6 s with zero intermediate turns**.
+Real task (Freeform: open board → Insert → Choose File → go to path → insert): 7 model turns by hand (~1 min) → 3 calls / 5.6 s with index-based `batch` (v0.1) → **2 calls / 8.4 s with `find` + `wait_for` and a verified insert (v0.2)**. `menu` inserting a triangle: 1 call, 2.4 s.
 
 ### Install
 
@@ -136,17 +140,46 @@ Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmas�
 
 | Özellik | Ne yapar | Kazanç |
 |---|---|---|
-| `batch` | Eylem listesini sırayla çalıştırır, yalnızca **son** durumu döndürür. `app` tüm eylemlere varsayılan. Hata olursa durur, o ana kadarki özeti verir. | N model turu → 1 |
-| `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. | Yanıt 159 KB → ~3 KB |
+| `batch` | Eylem listesini sırayla çalıştırır, yalnızca **son** durumu döndürür. `app` tüm eylemlere varsayılan. Hata olursa durur, o ana kadarki günlüğü verir. | N model turu → 1 |
+| **`find` ile hedefleme** (click, set_value, scroll, select_text, perform_secondary_action; batch içinde de) | `element_index` yerine metin: `{"tool":"click","find":"Choose File"}`. Son ağaçta tam eşleşme > sözcük eşleşmesi > alt dize; `/regex/`, `role`, `nth` desteklenir. Bulunamazsa taze ağaç alıp bir kez daha dener, yine yoksa yakın adayları listeler. | İndeks bilmeden tek `batch` ile tüm akış |
+| **`wait_for`** (batch eylemi) | Bir metin ağaçta görünene (veya `absent:true` ile kaybolana) kadar bekler; `timeout_ms` (4000). | Kör `sleep` yerine deterministik |
+| **`menu`** | `path:["Insert","Shape","Triangle"]` — menü çubuğundan yol tıklar. Codex menü ağacını iç içe verdiği için hedef görünür olunca ara adımları atlar. | 3 tur → 1 |
+| **`find_elements`** | Ağacın tamamını döndürmeden sorguyla eşleşen satırları verir. | Küçük yanıt |
+| `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. Açıkken görüntü `sips` ile **1280 px'e küçültülür** (JPEG kalite 70), orijinal çözünürlük ve çarpan metne yazılır. | 159 KB → ~3 KB (kapalı) / ~125 KB → küçültülmüş |
 | `press_key.repeat` | Aynı tuşu N kez (ör. 15× `shift+Down`). | 15 tur → 1 |
-| `open_path_in_dialog` | Açık Aç/Kaydet panelinde ⌘⇧G → yol → Return (→ Return). | 5 tur → 1 |
+| `open_path_in_dialog` | Açık Aç/Kaydet panelinde ⌘⇧G → yol → Return; dosya adının listede **seçili** görünmesini bekler, sonra panelin OK düğmesini (`OKButton`) ağaçtan bulup tıklar (kör Return değil). | 5 tur → 1, deterministik |
 | Otomatik uygulama açma | `-10005 app-server exited` görünce `open -g -a ChatGPT` ile uygulamayı arka planda açar, servis gelince bir kez yeniden dener. | Elle müdahale yok |
 | Temiz kapanma | SIGTERM/SIGINT/SIGHUP'ta üst akış süreç ağacını da kapatır. | Yetim istemci kalmaz |
-| `sleep_ms` (batch içinde) | Animasyon/panel beklemesi. | — |
+| `sleep_ms` (batch içinde) | Sabit bekleme (gerekirse). | — |
 
-Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (`true` yaparsan eski davranış), `CUA_PLUS_KEY_DELAY_MS` (tekrar aralığı, 40), `CUA_PLUS_APP_NAME` (`ChatGPT`), `CUA_PLUS_DEBUG=1`. Köprünün kendi değişkenleri (`COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS` vb.) aynen geçer.
+Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (`true` yaparsan eski davranış), `CUA_PLUS_SCREENSHOT_MAX_PX` (1280; `0` küçültmeyi kapatır), `CUA_PLUS_JPEG_QUALITY` (70), `CUA_PLUS_KEY_DELAY_MS` (tekrar aralığı, 40), `CUA_PLUS_APP_NAME` (`ChatGPT`), `CUA_PLUS_DEBUG=1`. Köprünün kendi değişkenleri (`COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS` vb.) aynen geçer.
 
-**Gerçek ölçüm:** Freeform'da "panoyu aç → Insert → Choose File → yola git → ekle → kopyayı sil" akışı: elle 7 model turu → `batch` + makro ile **5,6 sn, 0 ara tur**.
+**Gerçek ölçüm (Freeform, resim ekleme):**
+
+| Yöntem | Model turu | Süre |
+|---|---|---|
+| Elle, her adım ayrı çağrı | 7 | ~1 dk |
+| `batch` (indeksle) + `open_path_in_dialog` (v0.1) | 3 | 5,6 sn |
+| `batch` (**find** + **wait_for**) + `open_path_in_dialog` (v0.2) | **2** | 8,4 sn* |
+
+\* v0.2'de süre biraz daha uzun çünkü her adım doğrulanıyor (`wait_for`, listede seçim beklemesi, OK düğmesini ağaçtan bulma); karşılığında kör Return'ün ekleme yapmadan geçtiği durum ortadan kalktı. `menu` ile üçgen ekleme: 2,4 sn, 1 çağrı.
+
+Tek `batch` örneği (indeks bilmeden):
+
+```json
+{
+  "app": "Freeform",
+  "actions": [
+    {"tool": "click", "find": "New Board", "role": "button"},
+    {"tool": "wait_for", "args": {"text": "Window: \"Untitled"}},
+    {"tool": "click", "find": "Insert"},
+    {"tool": "click", "find": "Choose File"},
+    {"tool": "wait_for", "args": {"text": "Window: \"Open\""}}
+  ],
+  "final_state": false
+}
+```
+ardından `open_path_in_dialog {"app":"Freeform","path":"/tam/yol/resim.png"}`.
 
 ## Kurulum
 
@@ -215,6 +248,7 @@ Python'dan doğrudan (Claude olmadan) sürmek için `examples/freeform_insert_im
 
 ```
 server.mjs                         sarmalayıcı MCP sunucusu (tek dosya)
+CHANGELOG.md                       sürüm notları
 scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?
