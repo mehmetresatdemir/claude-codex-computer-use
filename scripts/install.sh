@@ -39,6 +39,18 @@ claude mcp add codex-computer-use -s user \
   -e "COMPUTER_USE_CLIENT_PATH=$CLIENT" \
   -- "$NODE_BIN/node" "$SERVER"
 
+# --- örnek makrolar ---
+MACRO_DIR="${CUA_PLUS_MACRO_DIR:-$HOME/.codex-cua-plus}"; mkdir -p "$MACRO_DIR"
+python3 - "$HERE/examples/macros" "$MACRO_DIR/macros.json" <<'EOF'
+import json, sys, os, glob, datetime
+src, dst = sys.argv[1], sys.argv[2]
+m = json.load(open(dst)) if os.path.exists(dst) else {}
+for f in glob.glob(os.path.join(src, "*.json")):
+    d = json.load(open(f)); name = d.pop("name")
+    if name not in m: d["saved_at"] = datetime.datetime.now().isoformat(); m[name] = d; print("makro eklendi:", name)
+json.dump(m, open(dst, "w"), indent=2, ensure_ascii=False)
+EOF
+
 echo
 claude mcp get codex-computer-use
 echo

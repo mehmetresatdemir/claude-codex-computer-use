@@ -18,7 +18,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -147,7 +147,7 @@ function treeDiff(before, after) {
   return { added, removed };
 }
 // Diff'te gürültü sayılan satırlar: kaydırma çubukları, ok/sayfa düğmeleri, ayırıcılar, başlıksız image/text/cell/container.
-const NOISE_RE = /^(scroll bar\b|value indicator\b|increment (arrow|page) button|decrement (arrow|page) button|splitter\b|image$|text$|cell$|container$|section\b|collection$|group$|split group\b|scroll area\b|toolbar$|menu bar$|handle Description:)/;
+const NOISE_RE = /^(scroll bar\b|value indicator\b|increment (arrow|page) button|decrement (arrow|page) button|splitter\b|image$|text$|cell$|container$|section\b|collection$|group$|split group\b|scroll area\b|toolbar$|menu bar$|handle Description:|ruler( marker)?\b)/;
 function diffText(before, after, { compact = true } = {}) {
   let { added, removed } = treeDiff(before, after);
   let hidden = 0;
@@ -172,6 +172,11 @@ const BUILTIN_NOTES = {
     "drag ve tutamaçlara set_value şekilleri taşımaz/boyutlandırmaz (sentetik sürükleme yoksayılır). Resimleri dosya olarak ekle (Insert > Choose File).",
     "Pano içinde Escape 'All Boards' görünümüne döndürebilir. Menü çubuğu 'Insert' öğesi tam eşleşmeyle bulunur; alt menü öğeleri (Shape > Triangle) aynı ağaçta görünür.",
     "Quick Look açıksa Escape kapatmayabilir; 'close panel button' öğesine tıkla.",
+  ],
+  "textedit": [
+    "Belge gövdesi 'text entry area (settable) First Text View'; type_text find=\"First Text View\" ile yaz. Yeni belge RTF'tir: .txt istersen yazmadan önce super+shift+t (Make Plain Text), yoksa ada .rtf eklenir.",
+    "Save panelinde ad alanı 'text field (settable) … ID: saveAsNameTextField'; 'Save As:' ayrı bir etiket. Klasöre super+shift+g ile git. Kaydedince pencere başlığı dosya adı olur; wait_for'da kapanış tırnağı kullanma (Window: \"ad).",
+    "Açılışta belge yoksa Open paneli gelir: 'New Document' düğmesine tıkla.",
   ],
 };
 function notesFor(app) {
@@ -261,6 +266,9 @@ const ACTION_SCHEMA = {
     role: { type: "string", description: "find ile birlikte: satır bu rolle başlamalı (ör. 'button', 'menu item', 'text field')." },
     nth: { type: "integer", minimum: 0, description: "find birden çok eşleşirse kaçıncısı (0 = ilk)." },
     repeat: { type: "integer", minimum: 1, maximum: 200, description: "Bu eylemi kaç kez tekrarla (ör. ok tuşu)." },
+    if_present: { type: "string", description: "Yalnızca bu metin son ağaçta varsa çalıştır (yoksa adım atlanır)." },
+    if_absent: { type: "string", description: "Yalnızca bu metin son ağaçta yoksa çalıştır." },
+    optional: { type: "boolean", description: "Hata verirse batch'i durdurma, atla ve devam et." },
   },
   required: ["tool"],
 };
@@ -277,10 +285,28 @@ const EXTRA_TOOLS = [
         final_state: { type: "boolean", description: "Sonda get_app_state çağır (varsayılan true)." },
         output: { type: "string", enum: ["full", "diff"], description: "full: son ağacın tamamı (varsayılan). diff: pencere satırı + batch öncesine göre eklenen/silinen satırlar; çok daha küçük." },
         compact: { type: "boolean", description: "diff'te gürültü satırlarını (kaydırma çubuğu, ok düğmeleri, tutamaç, başlıksız image/text) gizle (varsayılan true)." },
+        dry_run: { type: "boolean", description: "Hiçbir eylem yapma; find hedeflerinin şu anki ağaçta hangi indekse çözüleceğini göster." },
+        params: { type: "object", description: "Eylemlerdeki {{ad}} yer tutucularını bu değerlerle doldur (save_as ile birlikte: şablon ham kaydedilir)." },
+        save_as: { type: "string", description: "Batch başarılı biterse eylem listesini bu adla makro olarak kaydet ({{param}} yer tutucuları otomatik çıkarılır)." },
+        save_description: { type: "string" },
         screenshot_on_error: { type: "boolean", description: "Bir adım hata verirse teşhis için küçültülmüş ekran görüntüsü ekle (varsayılan true)." },
         auto_recover: { type: "boolean", description: "Ağaç kökü takılı bir menüyse ve find orada bulamazsa önce menüyü kapatmayı dene (varsayılan true)." },
       },
       required: ["actions"],
+    },
+  },
+  {
+    name: "status",
+    description: "Sağlık/teşhis: sarmalayıcı sürümü, ChatGPT.app / app-server / servis / istemci durumu, list_apps ping gecikmesi, kayıtlı makrolar ve not dosyaları.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "screenshot",
+    description: "Uygulamanın anlık görüntüsü; isteğe bağlı region=[x0,y0,x1,y1] (orijinal koordinat) ile kırpıp küçük yazıları okumak için yakınlaştır. max_px ile çıktı boyutu (0 = küçültme). Ağaç yetmediğinde koordinatla tıklamanın tamamlayıcısı.",
+    inputSchema: {
+      type: "object",
+      properties: { app: { type: "string" }, region: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 }, max_px: { type: "integer", minimum: 0 } },
+      required: ["app"],
     },
   },
   {
@@ -354,7 +380,9 @@ const EXTRA_TOOLS = [
   },
 ];
 
-const TARGETABLE = new Set(["click", "set_value", "scroll", "select_text", "perform_secondary_action"]);
+const TARGETABLE = new Set(["click", "set_value", "scroll", "select_text", "perform_secondary_action", "type_text"]);
+// type_text'te find: önce öğeye tıklayıp odaklanır, sonra yazar (element_index parametresi yok).
+const FOCUS_THEN_ACT = new Set(["type_text"]);
 async function listTools() {
   await ensureUpstream();
   const r = await upRequest("tools/list", {});
@@ -443,6 +471,7 @@ async function runAction(defaultApp, action, state) {
   const args = { ...(action.args || {}) };
   if (defaultApp && args.app === undefined) args.app = defaultApp;
   const app = args.app;
+  if (state.dryRun && !action.find) return { result: null, note: "(dry-run, hedef find değil)" };
   if (action.tool === "sleep_ms") { await sleep(Number(args.ms ?? 300)); return { result: { content: [{ type: "text", text: `slept ${args.ms ?? 300} ms` }] }, note: `${args.ms ?? 300} ms` }; }
   if (action.tool === "wait_for") {
     const w = await waitFor(app, args, state);
@@ -458,7 +487,13 @@ async function runAction(defaultApp, action, state) {
   }
   const target = await resolveTarget(app, action, state);
   if (!target.ok) return { result: null, error: target.error };
-  if (target.index !== undefined) args.element_index = target.index;
+  if (state.dryRun) return { result: null, note: target.index !== undefined ? `→ [${target.index}] ${target.line.slice(0, 60)} (dry-run)` : "(dry-run)" };
+  if (target.index !== undefined) {
+    if (FOCUS_THEN_ACT.has(action.tool)) {
+      const f = await callUpstream("click", { app, element_index: target.index });
+      if (isSoftError(f)) return { result: f, error: `odaklama tıklaması: ${resultText(f).slice(0, 120)}` };
+    } else args.element_index = target.index;
+  }
   delete args.find; delete args.role; delete args.nth;
   const n = action.repeat ?? 1;
   let last;
@@ -479,8 +514,9 @@ async function runAction(defaultApp, action, state) {
   return { result: last, note: target.line ? `→ [${target.index}] ${target.line.slice(0, 60)}` : undefined };
 }
 
-async function runBatch(app, actions, { finalState = true, autoRecover = true, captureBefore = false } = {}) {
-  const state = { lastTree: null, autoRecover };
+async function runBatch(app, actions, { finalState = true, autoRecover = true, captureBefore = false, dryRun = false } = {}) {
+  const state = { lastTree: null, autoRecover, dryRun };
+  if (dryRun) { finalState = false; captureBefore = false; const st = await callUpstream("get_app_state", { app }); state.lastTree = resultText(st); }
   const log = [];
   let last = null, before = null;
   if (captureBefore && app) { const st = await callUpstream("get_app_state", { app }); before = resultText(st); state.lastTree = before; }
@@ -490,13 +526,20 @@ async function runBatch(app, actions, { finalState = true, autoRecover = true, c
     const label = `${i + 1}. ${a.tool}${a.repeat > 1 ? `×${a.repeat}` : ""}${a.find ? ` find="${a.find}"` : ""}`;
     const ts = Date.now();
     try {
+      // Koşul: if_present / if_absent son ağaca bakar (yoksa taze okur).
+      if (a.if_present !== undefined || a.if_absent !== undefined) {
+        if (!(state.lastTree && looksLikeTree(state.lastTree)) && app) { const st = await callUpstream("get_app_state", { app }); state.lastTree = resultText(st); }
+        const tree = (state.lastTree || "").toLowerCase();
+        const skip = (a.if_present !== undefined && !tree.includes(String(a.if_present).toLowerCase())) || (a.if_absent !== undefined && tree.includes(String(a.if_absent).toLowerCase()));
+        if (skip) { log.push(`${label} atlandı (koşul: ${a.if_present !== undefined ? `'${a.if_present}' yok` : `'${a.if_absent}' var`})`); continue; }
+      }
       const r = await runAction(app, a, state);
       if (state.recoverLog?.length) { log.push(...state.recoverLog); state.recoverLog = []; }
       if (r.result) last = r.result;
       const ms = `${Date.now() - ts} ms`;
-      if (r.error) { log.push(`${label} HATA (${ms}): ${r.error}`); failed = true; break; }
+      if (r.error) { if (a.optional) { log.push(`${label} atlandı (optional, ${ms}): ${r.error.slice(0, 120)}`); continue; } log.push(`${label} HATA (${ms}): ${r.error}`); failed = true; break; }
       log.push(`${label} ok (${ms})${r.note ? ` ${r.note}` : ""}`);
-    } catch (e) { log.push(`${label} HATA (${Date.now() - ts} ms): ${e.message}`); failed = true; break; }
+    } catch (e) { if (a.optional) { log.push(`${label} atlandı (optional): ${e.message}`); continue; } log.push(`${label} HATA (${Date.now() - ts} ms): ${e.message}`); failed = true; break; }
   }
   // Son eylem zaten tam ağaç döndürdüyse (click/press_key/wait_for sonucu) ekstra okuma yapma (~120 ms).
   const lastIsFresh = !failed && last && looksLikeTree(resultText(last)) && !isSoftError(last);
@@ -564,8 +607,57 @@ async function callTool(name, rawArgs) {
   delete args.include_screenshot;
 
   if (name === "batch") {
-    const res = await runBatch(args.app, args.actions, { finalState: args.final_state !== false, autoRecover: args.auto_recover !== false, captureBefore: args.output === "diff" });
+    // params: {{ad}} yer tutucuları çalıştırmadan önce doldurulur; save_as şablonu ham (yer tutuculu) kaydeder.
+    const actions = args.params ? substitute(args.actions, args.params) : args.actions;
+    const res = await runBatch(args.app, actions, { finalState: args.final_state !== false, autoRecover: args.auto_recover !== false, captureBefore: args.output === "diff", dryRun: !!args.dry_run });
+    if (args.dry_run) return { content: [{ type: "text", text: `batch (dry-run, hiçbir eylem yapılmadı):\n${res.log.join("\n")}` }] };
+    if (args.save_as && !res.failed) {
+      const macros = loadMacros();
+      macros[args.save_as] = { description: args.save_description || "", app: args.app, params: [...new Set([...JSON.stringify(args.actions).matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1]))], actions: args.actions, saved_at: new Date().toISOString() };
+      saveMacros(macros); res.log.push(`makro kaydedildi: ${args.save_as}`);
+    }
     return packBatch("batch", res, { wantShot, output: args.output, compact: args.compact !== false, app: args.app, shotOnError: args.screenshot_on_error !== false });
+  }
+
+  if (name === "status") {
+    const t0 = Date.now();
+    const pg = async (pat) => (await run("pgrep", ["-f", pat])).code === 0;
+    const [app, server, svc, client] = await Promise.all([pg(`${CODEX_APP_NAME}.app/Contents/MacOS/${CODEX_APP_NAME}`), pg("codex .*app-server"), pg("SkyComputerUseService"), pg("SkyComputerUseClient mcp")]);
+    let ping = null, apps = null;
+    try { const r = await upRequest("tools/call", { name: "list_apps", arguments: {} }); ping = Date.now() - t0; apps = (resultText(r).match(/\[frontmost|\[running/g) || []).length; } catch (e) { ping = `hata: ${e.message}`; }
+    const macros = Object.keys(loadMacros());
+    const lines = [
+      `codex-cua-plus ${VERSION} | node ${process.version} | idle ${process.env.COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS || "60000"} ms | görüntü varsayılan ${DEFAULT_SCREENSHOT ? "açık" : "kapalı"} (${SCREENSHOT_MAX_PX} px)`,
+      `${CODEX_APP_NAME}.app: ${app ? "açık" : "KAPALI (servis çalışmaz; sarmalayıcı -10005'te açmayı dener)"}`,
+      `codex app-server: ${server ? "var" : "yok"} | SkyComputerUseService: ${svc ? "çalışıyor" : "yok"} | SkyComputerUseClient: ${client ? "çalışıyor" : "boşta/kapalı (ilk çağrıda açılır)"}`,
+      `list_apps ping: ${typeof ping === "number" ? `${ping} ms` : ping}${apps !== null ? ` (${apps} çalışan uygulama)` : ""}`,
+      `makrolar (${macros.length}): ${macros.join(", ") || "-"} → ${MACRO_FILE}`,
+      `notlar: ${Object.keys(BUILTIN_NOTES).join(", ")} (yerleşik)${existsSync(NOTES_FILE) ? ` + ${NOTES_FILE}` : ""}`,
+    ];
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  }
+
+  if (name === "screenshot") {
+    const st = await callUpstream("get_app_state", { app: args.app });
+    const img = (st.content || []).find((c) => c.type === "image");
+    if (!img) return { content: [{ type: "text", text: "Görüntü alınamadı." }, ...st.content.filter((c) => c.type === "text")], isError: true };
+    const buf = Buffer.from(img.data, "base64");
+    const dir = mkdtempSync(join(tmpdir(), "cua-plus-")); const f = join(dir, "s.jpg");
+    try {
+      writeFileSync(f, buf);
+      const size = await imageSize(f);
+      const notes = [`Orijinal ${size?.w}×${size?.h} px (koordinatlar bu çözünürlükte).`];
+      if (args.region) {
+        const [x0, y0, x1, y1] = args.region.map((v) => Math.round(v));
+        const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+        const c = await run("sips", ["-c", String(h), String(w), "--cropOffset", String(y0), String(x0), f]);
+        if (c.code !== 0) return { content: [{ type: "text", text: "Kırpma başarısız (region ekran içinde mi?)." }], isError: true };
+        notes.push(`Bölge [${x0},${y0}]–[${x1},${y1}] kırpıldı; bölgedeki piksel + (${x0},${y0}) = orijinal koordinat.`);
+      }
+      const maxPx = Number(args.max_px ?? SCREENSHOT_MAX_PX);
+      if (maxPx) { const sz = await imageSize(f); if (sz && Math.max(sz.w, sz.h) > maxPx) { await run("sips", ["-Z", String(maxPx), "-s", "formatOptions", String(process.env.CUA_PLUS_JPEG_QUALITY ?? 70), f]); const ns = await imageSize(f); notes.push(`${ns?.w}×${ns?.h} px'e küçültüldü; çarpan ${(sz.w / ns.w).toFixed(3)}.`); } }
+      return { content: [{ type: "text", text: `${windowLine(resultText(st))}\n${notes.join(" ")}` }, { type: "image", data: readFileSync(f).toString("base64"), mimeType: "image/jpeg" }] };
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   }
 
   if (name === "recover") {

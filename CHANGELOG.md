@@ -1,5 +1,18 @@
 # Değişiklikler
 
+## 0.5.0 — 2026-10-02
+
+- **`type_text` + `find`**: alanı adıyla bulur, önce tıklayıp odaklar, sonra yazar.
+- **`screenshot`** aracı: isteğe bağlı `region=[x0,y0,x1,y1]` (orijinal koordinat) ile kırpma ve `max_px`; küçük yazıları okumak için.
+- **`batch.dry_run`**: hiçbir eylem yapmadan `find` hedeflerinin hangi indekse çözüleceğini gösterir (ilk kullanımda TextEdit'te yanlış rol adını hemen yakaladı).
+- **`batch.params` + `save_as`**: `{{ad}}` yer tutucuları gerçek değerlerle çalışır, başarılı batch şablon olarak makroya kaydedilir.
+- **`status`** aracı: sürüm, ChatGPT.app / app-server / servis / istemci durumu, `list_apps` ping, makro ve not dosyaları.
+- `install.sh` örnek makroları `~/.codex-cua-plus/macros.json`'a kurar.
+- **İkinci uygulama testi (TextEdit)**: yeni belge → yaz → ⌘S → ⌘⇧G klasör → ad → Return; dosya diske yazıldı. Öğrenilenler yerleşik `textedit` notlarına ve `examples/macros/textedit_write_save.json`'a işlendi (RTF varsayılanı, `saveAsNameTextField`, `wait_for`'da kapanış tırnağı kullanma).
+- **Koşullu eylemler**: `if_present` / `if_absent` (son ağaçta metin var/yok) ve `optional` (hata batch'i durdurmaz). Örnek: Open paneli varsa "New Document"a tıkla, yoksa ⌘N. TextEdit makrosu 16 adım, 7,8 sn, düz metin dosyası doğrulandı.
+- `ruler`/`ruler marker` satırları diff gürültüsü sayılır.
+- Gözlem: son belgeyi ⌘W ile kapatınca pencere kalmadığı için Codex ~14 sn bekliyor; mümkünse belgeyi açık bırak veya bu gecikmeyi bekle.
+
 ## 0.4.1 — 2026-10-02
 
 - **Gecikme ölçümü**: tıklama ~650–1500 ms, arayüzü değiştirmeyen tuş ~10 ms, değiştiren tuş ~500 ms; taban maliyet servisin eylem sonrası "otur" beklemesi (uygulamadan bağımsız, ayarlanamıyor; boru hattı kazandırmıyor). Tablo README'de.

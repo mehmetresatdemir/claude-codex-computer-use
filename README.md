@@ -28,6 +28,12 @@ Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_app
 | **`find_elements`** — return only matching tree lines | small replies |
 | `include_screenshot` on every tool, **default off**; when on, the JPEG is downscaled with `sips` to 1280 px and the original size + multiplier is appended | 159 KB → ~3 KB (off) / ~125 KB (on) |
 | **`output: "diff"`** on `batch`/`run_macro` — window line + lines added/removed since the batch started (index-independent) + focus line; `compact` hides scroll bars, arrow buttons, handles and other noise | tens of lines instead of the whole tree; surprises (e.g. a Quick Look window) show up on the first line |
+| **`type_text` + `find`** — find the field by name, click to focus, type | no separate focus step |
+| **Conditional actions** `if_present` / `if_absent` / `optional` — run a step only if a text is (not) in the last tree; `optional` skips on error | branching flows in one macro (TextEdit: click "New Document" if the Open panel is up, else ⌘N) |
+| **`batch.dry_run`** — resolve every `find` against the current tree without acting | catches wrong role/title names before running |
+| **`batch.params` + `save_as`** — run with real values for `{{placeholders}}`, save the successful batch as a macro template | try once, then `run_macro` |
+| **`screenshot`** — optional `region` crop (original coordinates) and `max_px` | read small text, complement coordinate clicks |
+| **`status`** — version, ChatGPT.app / app-server / service / client state, `list_apps` ping, macro and notes files | one-call diagnosis |
 | **Per-step timings + screenshot on error** — every step logs its ms and the total; if a step fails, a downscaled screenshot is attached automatically | free benchmarking and diagnosis |
 | **App notes** — known traps per app attached once to results (built-in notes for Freeform; extend via `~/.codex-cua-plus/notes.json`) | the model doesn't fall into the same trap twice |
 | **Macros** — `save_macro` / `run_macro` / `list_macros`; stored in `~/.codex-cua-plus/macros.json`, `{{param}}` placeholders filled at run time; `open_path_in_dialog` and `recover` can be steps | a recurring job = 1 call (Freeform insert: 6 steps, 6.8 s) |
@@ -164,6 +170,12 @@ Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmas�
 | **`find_elements`** | Ağacın tamamını döndürmeden sorguyla eşleşen satırları verir. | Küçük yanıt |
 | `include_screenshot` (tüm araçlarda) | Varsayılan **kapalı**; ağaç yetmezse `true`. Açıkken görüntü `sips` ile **1280 px'e küçültülür** (JPEG kalite 70), orijinal çözünürlük ve çarpan metne yazılır. | 159 KB → ~3 KB (kapalı) / ~125 KB → küçültülmüş |
 | **`output: "diff"`** (`batch`, `run_macro`) | Tam ağaç yerine pencere satırı + batch öncesine göre eklenen/silinen satırlar (indeksten bağımsız) + odak satırı. `compact` (varsayılan) kaydırma çubuğu/ok düğmesi/tutamaç gibi gürültüyü gizler. | Yanıt onlarca satıra iner; beklenmedik pencereler (ör. Quick Look) anında görünür |
+| **`type_text` + `find`** | Alanı adıyla bul, tıklayıp odakla, yaz: `{"tool":"type_text","find":"First Text View","args":{"text":"…"}}`. | Odaklama için ayrı adım yok |
+| **Koşullu eylemler** `if_present` / `if_absent` / `optional` | Son ağaçta metin varsa/yoksa çalıştır; `optional` hata verirse atla. Ör. Open paneli varsa "New Document"a tıkla, yoksa ⌘N. | Dallanan akışlar tek makroda |
+| **`batch.dry_run`** | Hiçbir eylem yapmadan `find` hedeflerinin şu anki ağaçta hangi indekse çözüleceğini göster. | Yanlış rol/başlık adını çalıştırmadan yakalar |
+| **`batch.params` + `save_as`** | `{{ad}}` yer tutucuları gerçek değerlerle çalışır; başarılı batch şablon olarak makroya kaydedilir. | Bir kez dene, sonra `run_macro` |
+| **`screenshot`** | `region=[x0,y0,x1,y1]` ile kırp, `max_px` ile boyutla; küçük yazıları okumak için. | Koordinatla tıklamanın tamamlayıcısı |
+| **`status`** | Sürüm, ChatGPT.app / app-server / servis / istemci, `list_apps` ping, makro ve not dosyaları. | Tek çağrıda teşhis |
 | **Adım süreleri + hatada görüntü** | Günlükte her adımın ms'si ve toplam; bir adım durursa (`screenshot_on_error`) küçültülmüş görüntü otomatik eklenir. | Kıyaslama ve teşhis bedava |
 | **Uygulama notları** | Uygulamaya özel bilinen tuzaklar sonuçlara bir kez iliştirilir (yerleşik Freeform notları; `~/.codex-cua-plus/notes.json` ile genişletilir). | Model aynı tuzağa ikinci kez düşmez |
 | **Makrolar** `save_macro` / `run_macro` / `list_macros` | Başarılı bir eylem listesini isimle sakla (`~/.codex-cua-plus/macros.json`), `{{param}}` ile parametreleyip tek çağrıda çalıştır. `open_path_in_dialog` ve `recover` de eylem olarak girebilir. Örnek: `examples/macros/freeform_insert.json`. | Tekrarlayan iş = 1 çağrı |
@@ -276,7 +288,7 @@ Python'dan doğrudan (Claude olmadan) sürmek için `examples/freeform_insert_im
 ```
 server.mjs                         sarmalayıcı MCP sunucusu (tek dosya)
 CHANGELOG.md                       sürüm notları
-examples/macros/freeform_insert.json örnek makro (save_macro girdisi)
+examples/macros/*.json           örnek makrolar (install.sh kurar): freeform_insert, textedit_write_save
 scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?

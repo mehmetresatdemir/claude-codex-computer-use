@@ -1,0 +1,24 @@
+{
+  "name": "textedit_write_save",
+  "description": "TextEdit'te yeni düz metin belgesi açar, {{body}} yazar ve {{dir}}/{{name}} olarak kaydeder (Open paneli açıksa New Document'a tıklar).",
+  "app": "TextEdit",
+  "params": ["body", "dir", "name"],
+  "actions": [
+    { "tool": "get_app_state" },
+    { "tool": "click", "find": "New Document", "if_present": "NewDocumentButton" },
+    { "tool": "press_key", "args": { "key": "super+n" }, "if_absent": "First Text View" },
+    { "tool": "wait_for", "args": { "text": "First Text View" } },
+    { "tool": "press_key", "args": { "key": "super+shift+t" } },
+    { "tool": "type_text", "find": "First Text View", "args": { "text": "{{body}}" } },
+    { "tool": "press_key", "args": { "key": "super+s" } },
+    { "tool": "wait_for", "args": { "text": "save-panel" } },
+    { "tool": "press_key", "args": { "key": "super+shift+g" } },
+    { "tool": "wait_for", "args": { "text": "PathTextField" } },
+    { "tool": "set_value", "find": "PathTextField", "args": { "value": "{{dir}}" } },
+    { "tool": "press_key", "args": { "key": "Return" } },
+    { "tool": "wait_for", "args": { "text": "PathTextField", "absent": true } },
+    { "tool": "set_value", "find": "saveAsNameTextField", "args": { "value": "{{name}}" } },
+    { "tool": "press_key", "args": { "key": "Return" } },
+    { "tool": "wait_for", "args": { "text": "Window: \"{{name}}", "timeout_ms": 6000 } }
+  ]
+}
