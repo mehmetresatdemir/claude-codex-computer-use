@@ -19,7 +19,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -173,6 +173,7 @@ const BUILTIN_NOTES = {
     "drag ve tutamaçlara set_value şekilleri taşımaz/boyutlandırmaz (sentetik sürükleme yoksayılır). Resimleri dosya olarak ekle (Insert > Choose File).",
     "Pano içinde Escape 'All Boards' görünümüne döndürebilir. Menü çubuğu 'Insert' öğesi tam eşleşmeyle bulunur; alt menü öğeleri (Shape > Triangle) aynı ağaçta görünür.",
     "Quick Look açıksa Escape kapatmayabilir; 'close panel button' öğesine tıkla.",
+    "Kalem (Draw with Pen) yolu: bir yol içinde aynı noktaya ikinci kez tıklama (önceki noktayı seçer/kapatır); tekrar eden köşede yeni yol başlat (son köşeyi paylaş). Noktalar arası ≥0,6 s gerekir; Codex motoru üzerinden tıklamalar zaten ~1 s.",
     "Öğe taşıma: drag çalışmaz ama seçili öğe klavyeyle taşınır — press_key 'shift+Right'/'shift+Down' repeat ile (10 pt/adım; Codex 30×shift+Right kullandı). Sticky Note: Insert > Sticky Note sonra type_text; Text Box: Insert > Text Box sonra type_text; Escape düzenlemeyi bitirir.",
   ],
   "textedit": [
@@ -229,7 +230,7 @@ function findInTree(text, query, { role, nth = 0 } = {}) {
 // ---------- servis hata kodları (Codex'in IPC kodları; anlamlı mesaj + ne yapmalı) ----------
 const SERVICE_ERRORS = {
   "-10000": ["senderProcessNotAuthenticated", "İstemci imzalı başlatıcı olmadan açılmış; köprü/sarmalayıcı üzerinden kaydet."],
-  "-10005": ["unknownError / app-server exited", "ChatGPT.app veya codex app-server kapalı; sarmalayıcı uygulamayı açmayı dener."],
+  "-10005": ["unknownError", "Generic code; see the subtype: app-server exited → ChatGPT.app is closed (auto-launched); timeoutReached → tree too large/slow, use coordinates; invalidElementID → stale index, re-read the tree and retry."],
   "-10006": ["appNotAllowed", "Uygulama kuruluş politikasıyla engelli; başka uygulama seç."],
   "-10007": ["runningApplicationNotFound", "Uygulama bulunamadı; list_apps ile adı/bundle id'yi doğrula."],
   "-10008": ["accessibilityError", "Erişilebilirlik ağacı okunamadı; pencereyi öne getir veya koordinatla devam et."],
@@ -255,7 +256,7 @@ const STOP_CODES = /server error -1001[26]\b/; // kullanıcı durdurdu / araya g
 
 // ---------- servis/uygulama sağlığı ----------
 // -10005 "unknownError" genel koddur: yalnızca app-server kapalıyken uygulamayı aç; "timeoutReached" gibi alt türlerde açma.
-const SERVICE_DOWN = /app-server exited|Sender process is not authenticated|-10005(?!: ?timeout)/;
+const SERVICE_DOWN = /app-server exited|Sender process is not authenticated/;
 let launchingApp = null;
 async function ensureCodexAppRunning() {
   if (launchingApp) return launchingApp;
@@ -755,7 +756,10 @@ async function runScript(args) {
   const header = [`script: ${error ? "HATA: " + error : "ok"} (${Date.now() - t0} ms, ${state.actions || 0} eylem)`, ...state.logs.map((l) => `  ${l}`)].join("\n");
   const output = args.output || "diff";
   const wantShot = args.include_screenshot || state.wantShotAtEnd;
-  if (output === "none" || !appName) return { content: [{ type: "text", text: header }], isError: !!error || undefined };
+  if (output === "none" || !appName) {
+    const shot = wantShot && appName ? (await shrinkScreenshot(await callUpstream("get_app_state", { app: appName }))).content.filter((c) => c.type === "image") : [];
+    return { content: [{ type: "text", text: header }, ...shot], isError: !!error || undefined };
+  }
   const before = state.lastTree; // kod başında alınan ağaç
   const last = await callUpstream("get_app_state", { app: appName });
   const after = resultText(last);

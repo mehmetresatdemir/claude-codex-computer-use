@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 — 2026-10-02
+
+- **6-cube (hexeract) drawn in Freeform**: 64 vertices, 192 edges, 12-gon Petrie projection, one `script` call, 22 pen paths, 353 actions, 309 s (`examples/scripts/freeform_hexeract.js`, `docs/example-hexeract.jpg`). Lesson that went into the Freeform notes: the pen tool treats a second click on a point already in the current path as selecting/closing, so an Euler circuit must be split into vertex-unique trails (share the last vertex between trails).
+- `-10005` is no longer treated as "service down" by itself (subtypes: `app-server exited` → launch; `timeoutReached`, `invalidElementID` → don't); the hint names each subtype.
+- `script` with `output:"none"` now still attaches the screenshot when `include_screenshot` is set.
+
 ## 0.7.0 — 2026-10-02
 
 Learned from decoding Codex's own Computer Use (session logs, `@oai/sky` sources, live traffic) and from running the same multi-app task on both sides.
