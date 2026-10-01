@@ -1,0 +1,27 @@
+const t0 = Date.now();
+const ff = await cua.getApp("Freeform");
+await ff.click({find:"New Board", role:"button"});
+let ax = await ff.waitFor('Window: "Untitled');
+const board = ff.text(ax, /Window: "([^"]+)"/); log("pano:", board);
+await ff.menu(["Insert","Choose File"]); await ff.waitFor('Window: "Open"');
+await ff.openPath("/Users/red/Documents/claude-codex-computer-use/docs/ornek-ev.png");
+await ff.menu(["Insert","Sticky Note"]); await ff.typeText("Claude task test — 2 Oct 2026"); await ff.pressKey("Escape");
+await ff.click({find:"Claude görev", role:"layout item"}); await ff.nudge("right", 30);
+await ff.menu(["Insert","Text Box"]); await ff.typeText(board); await ff.pressKey("Escape");
+await ff.click({find:board, role:"layout item"}); await ff.nudge("down", 20);
+await ff.click([2300,1150]);
+ax = await ff.getAXState(); const items = ff.findAll(ax, /^(layout item|image) /); log("öğe sayısı:", items.length);
+const calc = await cua.getApp("Calculator");
+await calc.pressKey("Escape"); await calc.typeText("37*41"); await calc.pressKey("Return");
+const cax = await calc.getAXState(); const raw = calc.lastTextUnder(cax, "Edit field"); const result = raw ? raw.replace(/[^\d]/g, "") : null; log("37x41:", raw, "→", result);
+const te = await cua.getApp("TextEdit");
+let tax = await te.getAXState(); if (te.find(tax, "New Document")) { await te.click({find:"New Document"}); } else { await te.pressKey("super+n"); }
+await te.waitFor("First Text View");
+await te.menu(["Format","Make Plain Text"]);
+await te.typeText(`pano: ${board}\nöğe sayısı: ${items.length}\n37x41: ${result}`);
+await te.pressKey("super+s"); await te.waitFor("save-panel");
+await te.setValue({find:"saveAsNameTextField"}, "task-report.txt");
+await te.openPath("/Users/red/Documents/claude-codex-computer-use/docs");
+await te.waitFor('Window: "task-report.txt', {timeout: 6000});
+await ff.secondary(0, "Raise"); await ff.getAXStateAndScreenshot();
+log(`toplam ${Math.round((Date.now()-t0)/1000)} s`);

@@ -19,7 +19,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.6.1";
+const VERSION = "0.7.0";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -271,6 +271,10 @@ async function ensureCodexAppRunning() {
   })();
   try { return await launchingApp; } finally { setTimeout(() => { launchingApp = null; }, 10000); }
 }
+// Uygulama başına son tam ağaç: find çözümü ve diff çıktısı için (çağrılar arasında kalıcı).
+const treeCache = new Map();
+function cacheTree(app, result) { const t = resultText(result); if (app && looksLikeTree(t)) treeCache.set(String(app).toLowerCase(), t); }
+function cachedTree(app) { return app ? treeCache.get(String(app).toLowerCase()) || null : null; }
 async function callUpstream(name, args) {
   const attempt = async () => {
     try { return await upRequest("tools/call", { name, arguments: args }); }
@@ -281,82 +285,102 @@ async function callUpstream(name, args) {
     if (await ensureCodexAppRunning()) r = await attempt();
     if (SERVICE_DOWN.test(resultText(r))) r.content.push({ type: "text", text: `Not: Codex Computer Use servisi ${CODEX_APP_NAME}.app açıkken çalışır; uygulama başlatılamadı veya servis gelmedi.` });
   }
+  cacheTree(args?.app, r);
   return annotateServiceError(r);
+}
+// Codex'in varsayılan diff davranışının bizim karşılığı: önceki önbellek ağacına göre fark; değişiklik yoksa tek satır.
+const DEFAULT_OUTPUT = process.env.CUA_PLUS_DEFAULT_OUTPUT || "diff";
+function renderResult(result, before, output) {
+  const after = resultText(result);
+  if (output !== "diff" || !before || !looksLikeTree(after)) return result;
+  const texts = result.content.filter((c) => c.type === "text");
+  const others = result.content.filter((c) => c.type !== "text");
+  const extra = texts.slice(1).map((c) => c.text); // sarmalayıcının eklediği notlar vb.
+  const { added, removed } = treeDiff(before, after);
+  const focus = after.match(/^The focused UI element is .*$/m)?.[0] || "";
+  let body;
+  if (!added.length && !removed.length) body = `${windowLine(after)}\n(ağaçta değişiklik yok; tam ağaç için output:"full")\n${focus}`;
+  else body = diffText(before, after);
+  return { ...result, content: [{ type: "text", text: `[diff]\n${body}` }, ...extra.map((t) => ({ type: "text", text: t })), ...others] };
 }
 
 // ---------- araç tanımları ----------
-const FIND_DESC = "element_index yerine metinle hedefle: ağaç satırındaki rol/başlık (ör. 'Choose File', 'button New Board'). /regex/ de olur. Tam eşleşme > sözcük eşleşmesi > alt dize. Son bilinen ağaçta aranır; bulunamazsa taze get_app_state alınıp bir kez daha denenir.";
+const FIND_DESC = "Target by text instead of element_index: role/title on the tree line (e.g. 'Choose File', 'button New Board'); /regex/ allowed. Exact match > word match > substring. Resolved against the last known tree; if not found, a fresh get_app_state is taken and tried once more.";
 const ACTION_SCHEMA = {
   type: "object",
-  description: "Tek eylem. 'tool' üst akış aracı ya da wait_for/sleep_ms. Hedef: args.element_index VEYA find.",
+  description: "One action. 'tool' is an upstream tool or wait_for/sleep_ms/open_path_in_dialog/recover. Target: args.element_index OR find.",
   properties: {
     tool: { type: "string", enum: ["click", "set_value", "type_text", "press_key", "scroll", "drag", "select_text", "perform_secondary_action", "get_app_state", "wait_for", "sleep_ms", "open_path_in_dialog", "recover"] },
-    args: { type: "object", description: "Üst akış argümanları (app verilmezse batch.app kullanılır). wait_for: {text, timeout_ms=4000, absent=false}. sleep_ms: {ms}. open_path_in_dialog: {path, confirm=true}. recover: {}." },
+    args: { type: "object", description: "Upstream arguments (app defaults to batch.app). wait_for: {text, timeout_ms=4000, absent=false}. sleep_ms: {ms}. open_path_in_dialog: {path, confirm=true}. recover: {}." },
     find: { type: "string", description: FIND_DESC },
-    role: { type: "string", description: "find ile birlikte: satır bu rolle başlamalı (ör. 'button', 'menu item', 'text field')." },
-    nth: { type: "integer", minimum: 0, description: "find birden çok eşleşirse kaçıncısı (0 = ilk)." },
-    repeat: { type: "integer", minimum: 1, maximum: 200, description: "Bu eylemi kaç kez tekrarla (ör. ok tuşu)." },
-    if_present: { type: "string", description: "Yalnızca bu metin son ağaçta varsa çalıştır (yoksa adım atlanır)." },
-    if_absent: { type: "string", description: "Yalnızca bu metin son ağaçta yoksa çalıştır." },
-    optional: { type: "boolean", description: "Hata verirse batch'i durdurma, atla ve devam et." },
+    role: { type: "string", description: "With find: the line must start with this role (e.g. 'button', 'menu item', 'text field')." },
+    nth: { type: "integer", minimum: 0, description: "If find matches several lines, which one (0 = first)." },
+    repeat: { type: "integer", minimum: 1, maximum: 200, description: "Repeat this action N times (e.g. arrow keys)." },
+    if_present: { type: "string", description: "Run only if this text is in the last tree (otherwise the step is skipped)." },
+    if_absent: { type: "string", description: "Run only if this text is NOT in the last tree." },
+    optional: { type: "boolean", description: "On error, skip this step instead of stopping the batch." },
   },
   required: ["tool"],
 };
 const EXTRA_TOOLS = [
   {
     name: "batch",
-    description: "Birden çok Computer Use eylemini sırayla tek çağrıda çalıştırır; yalnızca son durum döner. Eylemler indeks bilmeden 'find' ile metinle hedeflenebilir (indeksler her adımda yeni ağaçtan çözülür). wait_for ile panel/pencere beklenir. Bir eylem hata verirse durur, o ana kadarki günlük döner.",
+    description: "Run several Computer Use actions in one call; only the final state is returned. Actions can be targeted by text with 'find' (indices are resolved from the fresh tree at each step). wait_for waits for panels/windows. On error the batch stops and returns the log so far.",
     inputSchema: {
       type: "object",
       properties: {
-        app: { type: "string", description: "Varsayılan hedef uygulama." },
+        app: { type: "string", description: "Default target app." },
         actions: { type: "array", items: ACTION_SCHEMA, minItems: 1 },
-        include_screenshot: { type: "boolean", description: `Son durumda ekran görüntüsü (varsayılan ${DEFAULT_SCREENSHOT}).` },
-        final_state: { type: "boolean", description: "Sonda get_app_state çağır (varsayılan true)." },
-        output: { type: "string", enum: ["full", "diff"], description: "full: son ağacın tamamı (varsayılan). diff: pencere satırı + batch öncesine göre eklenen/silinen satırlar; çok daha küçük." },
-        compact: { type: "boolean", description: "diff'te gürültü satırlarını (kaydırma çubuğu, ok düğmeleri, tutamaç, başlıksız image/text) gizle (varsayılan true)." },
-        dry_run: { type: "boolean", description: "Hiçbir eylem yapma; find hedeflerinin şu anki ağaçta hangi indekse çözüleceğini göster." },
-        params: { type: "object", description: "Eylemlerdeki {{ad}} yer tutucularını bu değerlerle doldur (save_as ile birlikte: şablon ham kaydedilir)." },
-        save_as: { type: "string", description: "Batch başarılı biterse eylem listesini bu adla makro olarak kaydet ({{param}} yer tutucuları otomatik çıkarılır)." },
+        include_screenshot: { type: "boolean", description: `Attach a screenshot of the final state (default ${DEFAULT_SCREENSHOT}).` },
+        final_state: { type: "boolean", description: "Call get_app_state at the end (default true)." },
+        output: { type: "string", enum: ["full", "diff"], description: "full: the whole final tree (default). diff: window line + lines added/removed since the batch started; much smaller." },
+        compact: { type: "boolean", description: "In diff mode hide noise lines (scroll bars, arrow buttons, handles, untitled image/text) (default true)." },
+        dry_run: { type: "boolean", description: "Do nothing; show which index each find target would resolve to in the current tree." },
+        params: { type: "object", description: "Fill {{name}} placeholders in the actions with these values (with save_as the template is stored raw)." },
+        save_as: { type: "string", description: "If the batch succeeds, save the action list as a macro under this name ({{param}} placeholders are extracted automatically)." },
         save_description: { type: "string" },
-        screenshot_on_error: { type: "boolean", description: "Bir adım hata verirse teşhis için küçültülmüş ekran görüntüsü ekle (varsayılan true)." },
-        auto_recover: { type: "boolean", description: "Ağaç kökü takılı bir menüyse ve find orada bulamazsa önce menüyü kapatmayı dene (varsayılan true)." },
+        screenshot_on_error: { type: "boolean", description: "Attach a downscaled screenshot when a step fails (default true)." },
+        auto_recover: { type: "boolean", description: "If the tree root is a stuck menu and find misses there, try to close the menu first (default true)." },
       },
       required: ["actions"],
     },
   },
   {
     name: "script",
-    description: `Codex'in cua_repl'ine denk kalıcı JavaScript ortamı: kod yerelde çalışır, tıklama başına model turu olmaz. Ortam çağrılar arasında korunur (değişkenler, fonksiyonlar). API:
-  const app = await cua.getApp("Freeform");          // uygulama nesnesi
+    description: `Persistent JavaScript environment modelled on Codex's cua_repl: code runs locally, no model round trip per click. Variables and functions survive between calls. API:
+  const app = await cua.getApp("Freeform");          // app object (cua.listApps() lists apps)
   await app.click(31) / app.click([x,y]) / app.click({find:"Choose File"});
-  await app.pressKey("Return"); await app.typeText("..."); await app.setValue(idx, "..."); await app.scroll(idx,"down",1); await app.drag([x1,y1],[x2,y2]); await app.secondary(idx,"Cancel");
-  const ax = await app.getAXState();                 // ağaç metni (modele GÖNDERİLMEZ, değişkende)
-  app.find(ax, "Draw with Pen") → indeks | null;  app.findAll(ax, /regex/) → [[idx, satır]...]
+  await app.pressKey("Return"); await app.typeText("..."); await app.setValue(idx|{find}, "..."); await app.scroll(idx,"down",1); await app.drag([x1,y1],[x2,y2]); await app.secondary(idx,"Cancel");
+  const ax = await app.getAXState();                 // tree text (NOT sent to the model; kept in a variable)
+  app.find(ax, "Draw with Pen") → index | null;  app.findAll(ax, /regex/) → [[idx, line]...]
+  app.value(ax, "Zoom") → "Value: ..." of a line; app.text(ax, /Window: "([^"]+)"/) → first group; app.lastTextUnder(ax, "Edit field") → last text row under a container (e.g. Calculator result)
   await app.waitFor("Window: \\"Open\\"", {timeout:4000, absent:false});
-  await sleep(ms); log("...")                        // log satırları sonuçta döner
-Sonuç: log + (final_state ise) son ağacın diff'i/tamamı + isteğe bağlı ekran görüntüsü. Örnek (kalemle çokgen): for (const p of pts) await app.click(p); await app.pressKey("Return"); await app.pressKey("Escape");`,
+  await app.nudge("right", 30);                      // move the selected item with shift+arrow (apps that ignore drag)
+  await app.menu(["Insert","Shape","Triangle"]);     // menu-bar path; skips intermediate items when the target is visible
+  await app.openPath("/full/path");                  // ⌘⇧G in an open Open/Save panel, wait for selection, confirm
+  await sleep(ms); log("...")                        // log lines are returned
+Result: log + (final_state) diff/full of the final tree + optional screenshot. Example (polyline with the pen tool): for (const p of pts) await app.click(p); await app.pressKey("Return"); await app.pressKey("Escape");`,
     inputSchema: {
       type: "object",
       properties: {
-        code: { type: "string", description: "Çalıştırılacak JavaScript (top-level await serbest)." },
-        app: { type: "string", description: "final_state için uygulama (kodda cua.getApp kullanıldıysa otomatik)." },
-        timeout_ms: { type: "integer", minimum: 1000, maximum: 600000, description: "Varsayılan 120000." },
-        output: { type: "string", enum: ["full", "diff", "none"], description: "Son durum: diff (varsayılan), full veya none." },
+        code: { type: "string", description: "JavaScript to run (top-level await allowed)." },
+        app: { type: "string", description: "App for final_state (automatic when cua.getApp was used)." },
+        timeout_ms: { type: "integer", minimum: 1000, maximum: 600000, description: "Default 120000." },
+        output: { type: "string", enum: ["full", "diff", "none"], description: "Final state: diff (default), full or none." },
         include_screenshot: { type: "boolean" },
-        reset: { type: "boolean", description: "Ortamı sıfırla (önceki değişkenleri at)." },
+        reset: { type: "boolean", description: "Reset the environment (drop previous variables)." },
       },
       required: ["code"],
     },
   },
   {
     name: "status",
-    description: "Sağlık/teşhis: sarmalayıcı sürümü, ChatGPT.app / app-server / servis / istemci durumu, list_apps ping gecikmesi, kayıtlı makrolar ve not dosyaları.",
+    description: "Health/diagnostics: wrapper version, ChatGPT.app / app-server / service / client state, list_apps ping latency, saved macros and notes files.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "screenshot",
-    description: "Uygulamanın anlık görüntüsü; isteğe bağlı region=[x0,y0,x1,y1] (orijinal koordinat) ile kırpıp küçük yazıları okumak için yakınlaştır. max_px ile çıktı boyutu (0 = küçültme). Ağaç yetmediğinde koordinatla tıklamanın tamamlayıcısı.",
+    description: "Screenshot of the app; optional region=[x0,y0,x1,y1] (original coordinates) crops and zooms to read small text. max_px sets the output size (0 = no downscale). Complements coordinate clicks when the tree is not enough.",
     inputSchema: {
       type: "object",
       properties: { app: { type: "string" }, region: { type: "array", items: { type: "number" }, minItems: 4, maxItems: 4 }, max_px: { type: "integer", minimum: 0 } },
@@ -365,30 +389,30 @@ Sonuç: log + (final_state ise) son ağacın diff'i/tamamı + isteğe bağlı ek
   },
   {
     name: "recover",
-    description: "Takılı/açık kalmış menüden kurtarır: Escape → menünün Cancel eylemi → pencere başlık çubuğuna koordinatla tıklama; her adımdan sonra ağaç kökünün menü olup olmadığını kontrol eder. Günlük döner.",
+    description: "Recover from a stuck/open menu: Escape → the menu's Cancel action → coordinate click on the title bar; after each step checks whether the tree root is still a menu. Returns a log.",
     inputSchema: { type: "object", properties: { app: { type: "string" }, include_screenshot: { type: "boolean" } }, required: ["app"] },
   },
   {
     name: "save_macro",
-    description: `Bir batch eylem listesini isimle kaydeder (${MACRO_FILE}). Dizelerde {{param}} yer tutucuları run_macro'da doldurulur. Aynı isim üzerine yazar.`,
+    description: `Save a batch action list under a name (${MACRO_FILE}). {{param}} placeholders in strings are filled by run_macro. Same name overwrites.`,
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string" }, description: { type: "string" },
-        app: { type: "string", description: "Varsayılan uygulama (run_macro'da geçersiz kılınabilir)." },
+        app: { type: "string", description: "Default app (can be overridden in run_macro)." },
         actions: { type: "array", items: ACTION_SCHEMA, minItems: 1 },
-        params: { type: "array", items: { type: "string" }, description: "Beklenen parametre adları (belgeleme amaçlı)." },
+        params: { type: "array", items: { type: "string" }, description: "Expected parameter names (documentation)." },
       },
       required: ["name", "actions"],
     },
   },
   {
     name: "run_macro",
-    description: "Kaydedilmiş makroyu parametrelerle çalıştırır (batch gibi; yalnızca son durum döner).",
+    description: "Run a saved macro with parameters (like batch; only the final state is returned).",
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string" }, params: { type: "object", description: "{{param}} değerleri." },
+        name: { type: "string" }, params: { type: "object", description: "{{param}} values." },
         app: { type: "string" }, include_screenshot: { type: "boolean" }, output: { type: "string", enum: ["full", "diff"] }, final_state: { type: "boolean" },
         compact: { type: "boolean" }, screenshot_on_error: { type: "boolean" },
       },
@@ -397,12 +421,12 @@ Sonuç: log + (final_state ise) son ağacın diff'i/tamamı + isteğe bağlı ek
   },
   {
     name: "list_macros",
-    description: "Kayıtlı makroları (ad, açıklama, parametreler, adım sayısı) listeler.",
+    description: "List saved macros (name, description, parameters, step count).",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "menu",
-    description: "Menü çubuğundan bir yol tıklar: path=['Insert','Shape','Triangle']. Her adımda yeni ağaçta metinle arar. Sonda isteğe bağlı ekran görüntüsü.",
+    description: "Click a menu-bar path: path=['Insert','Shape','Triangle']. Each step is found by text in the fresh tree. Optional screenshot at the end.",
     inputSchema: {
       type: "object",
       properties: { app: { type: "string" }, path: { type: "array", items: { type: "string" }, minItems: 1 }, include_screenshot: { type: "boolean" } },
@@ -411,22 +435,22 @@ Sonuç: log + (final_state ise) son ağacın diff'i/tamamı + isteğe bağlı ek
   },
   {
     name: "find_elements",
-    description: "Ağacın tamamını döndürmeden, sorguyla eşleşen satırları (indeks + rol/başlık) döndürür. Taze get_app_state alır.",
+    description: "Return only the tree lines matching the query (index + role/title) without the whole tree. Takes a fresh get_app_state.",
     inputSchema: {
       type: "object",
-      properties: { app: { type: "string" }, query: { type: "string", description: "Alt dize veya /regex/." }, role: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } },
+      properties: { app: { type: "string" }, query: { type: "string", description: "Substring or /regex/." }, role: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } },
       required: ["app", "query"],
     },
   },
   {
     name: "open_path_in_dialog",
-    description: "Açık bir macOS Aç/Kaydet panelinde ⌘⇧G ile 'Go to Folder' açar, verilen yolu yazar ve Return ile o dosyaya/klasöre gider. confirm=true ise bir Return daha basarak panelin varsayılan düğmesini (Open/Insert/Save) tetikler.",
+    description: "In an open macOS Open/Save panel: ⌘⇧G opens 'Go to Folder', types the path, Return navigates to the file/folder. With confirm=true waits for the item to be selected, then triggers the panel's default button (Open/Insert/Save) — Return first, button click as fallback.",
     inputSchema: {
       type: "object",
       properties: {
         app: { type: "string" },
-        path: { type: "string", description: "Tam dosya veya klasör yolu." },
-        confirm: { type: "boolean", description: "Yola gittikten sonra varsayılan düğmeye bas (varsayılan true)." },
+        path: { type: "string", description: "Full file or folder path." },
+        confirm: { type: "boolean", description: "Press the default button after navigating (default true)." },
         include_screenshot: { type: "boolean" },
       },
       required: ["app", "path"],
@@ -444,16 +468,17 @@ async function listTools() {
     const schema = structuredClone(t.inputSchema || { type: "object", properties: {} });
     schema.properties ||= {};
     if (t.name !== "list_apps") {
-      schema.properties.include_screenshot = { type: "boolean", description: `Ekran görüntüsü dönsün mü (varsayılan ${DEFAULT_SCREENSHOT}). Ağaç yeterliyse kapalı bırak; çok daha hızlı. Açıksa ${SCREENSHOT_MAX_PX || "tam"} px'e küçültülür.` };
+      schema.properties.include_screenshot = { type: "boolean", description: `Return a screenshot (default ${DEFAULT_SCREENSHOT}). Leave off when the tree is enough; much faster. When on, it is downscaled to ${SCREENSHOT_MAX_PX || "full"} px.` };
+      schema.properties.output = { type: "string", enum: ["diff", "full"], description: `diff (default ${DEFAULT_OUTPUT}): only lines changed since the last known tree for this app; full: the whole tree. The first call always returns full.` };
     }
     if (TARGETABLE.has(t.name)) {
       schema.properties.find = { type: "string", description: FIND_DESC };
-      schema.properties.role = { type: "string", description: "find ile: satır bu rolle başlamalı." };
+      schema.properties.role = { type: "string", description: "With find: the line must start with this role." };
       schema.properties.nth = { type: "integer", minimum: 0 };
       if (schema.required) schema.required = schema.required.filter((k) => k !== "element_index");
     }
     if (t.name === "press_key") {
-      schema.properties.repeat = { type: "integer", minimum: 1, maximum: 200, description: "Tuşu kaç kez bas (ör. 15 kez shift+Down)." };
+      schema.properties.repeat = { type: "integer", minimum: 1, maximum: 200, description: "Press the key N times (e.g. 15× shift+Down)." };
     }
     return { ...t, inputSchema: schema };
   });
@@ -489,7 +514,7 @@ async function recover(app, state) {
 
 async function resolveTarget(app, action, state) {
   if (!action.find) return { ok: true };
-  let tree = state.lastTree && looksLikeTree(state.lastTree) ? state.lastTree : null;
+  let tree = state.lastTree && looksLikeTree(state.lastTree) ? state.lastTree : cachedTree(app);
   let res = tree ? findInTree(tree, action.find, { role: action.role, nth: action.nth }) : { hit: null, candidates: [] };
   if (!res.hit) {
     const st = await callUpstream("get_app_state", { app });
@@ -669,7 +694,7 @@ function makeApp(appName, state) {
   };
   const resolve = async (target) => {
     if (target && typeof target === "object" && !Array.isArray(target) && target.find) {
-      let tree = state.lastTree; let hit = tree && findInTree(tree, target.find, { role: target.role, nth: target.nth }).hit;
+      let tree = state.lastTree || cachedTree(appName); let hit = tree && findInTree(tree, target.find, { role: target.role, nth: target.nth }).hit;
       if (!hit) { tree = await call("get_app_state", {}); hit = findInTree(tree, target.find, { role: target.role, nth: target.nth }).hit; }
       if (!hit) throw new Error(`'${target.find}' ağaçta bulunamadı`);
       return { element_index: hit.index };
@@ -692,6 +717,19 @@ function makeApp(appName, state) {
     find: (tree, query, opts = {}) => { const h = findInTree(tree, query, opts).hit; return h ? Number(h.index) : null; },
     findAll: (tree, query, opts = {}) => findInTree(tree, query, opts).candidates.map((c) => [Number(c.index), c.rest]),
     waitFor: async (text, { timeout = 4000, absent = false } = {}) => { const w = await waitFor(appName, { text, timeout_ms: timeout, absent }, state); if (!w.ok) throw new Error(w.error); return state.lastTree; },
+    // --- bileşik yardımcılar (Codex görev gözlemlerinden) ---
+    // Seçili öğeyi klavyeyle taşı: Freeform gibi drag'i yoksayan uygulamalarda shift+ok 10 pt/adım.
+    nudge: async (direction, n = 1, { shift = true } = {}) => { const key = `${shift ? "shift+" : ""}${{ up: "Up", down: "Down", left: "Left", right: "Right" }[direction] || direction}`; for (let i = 0; i < n; i++) await call("press_key", { key }); return state.lastTree; },
+    // Menü çubuğu yolu: hedef görünürse ara adımları atla.
+    menu: async (path) => { const target = path[path.length - 1]; for (let i = 0; i < path.length; i++) { const tree = state.lastTree || cachedTree(appName) || (await call("get_app_state", {})); const hitT = i > 0 && findInTree(tree, target).hit; const q = hitT ? target : path[i]; const hit = findInTree(tree, q).hit || findInTree(await call("get_app_state", {}), q).hit; if (!hit) throw new Error(`menu: '${q}' bulunamadı`); await call("click", { element_index: hit.index }); if (hitT || q === target) break; } return state.lastTree; },
+    // Açık Aç/Kaydet panelinde yola git ve onayla.
+    openPath: async (path, { confirm = true } = {}) => { const r = await openPathInDialog(appName, { path, confirm }, state); if (!r.ok) throw new Error(r.log.join("; ")); state.actions = (state.actions || 0) + 4; return state.lastTree; },
+    // Ağaç satırından "Value: ..." ya da başlığı oku (Calculator sonucu, alan değeri vb.).
+    value: (tree, query, opts = {}) => { const h = findInTree(tree, query, opts).hit; if (!h) return null; const rest = h.rest.replace(/[‎‏‪-‮]/g, ""); const m = rest.match(/Value: (.*?)(?:, (?:ID|Secondary Actions|Help|Description):|$)/); return (m ? m[1] : rest.replace(/^\w[\w ]*? /, "")).trim(); },
+    // Ağaçta regex ile metin yakala (ilk grup); görünmez yön işaretleri temizlenir.
+    text: (tree, re) => { const m = tree.replace(/[‎‏‪-‮]/g, "").match(re); return m ? (m[1] ?? m[0]) : null; },
+    // Bir kapsayıcının (ör. "Last Expression") altındaki son metin satırını oku — Calculator sonucu gibi.
+    lastTextUnder: (tree, query) => { const clean = tree.replace(/[‎‏‪-‮]/g, ""); const rows = parseTree(clean); const i = rows.findIndex((r) => findInTree(`${r.index} ${r.rest}`, query).hit); if (i < 0) return null; const base = (clean.split("\n").find((l) => l.trim().startsWith(rows[i].index + " ")) || "").search(/\S/); let last = null; for (const l of clean.split("\n").slice(clean.split("\n").findIndex((l) => l.trim().startsWith(rows[i].index + " ")) + 1)) { const ind = l.search(/\S/); if (ind <= base) break; const m = l.match(/^\s*\d+ text (.+)$/); if (m) last = m[1].trim(); } return last; },
   };
 }
 async function runScript(args) {
@@ -859,23 +897,26 @@ async function callTool(name, rawArgs) {
     return { ...out, isError: !r.ok || undefined, content: [{ type: "text", text: `open_path_in_dialog:\n${r.log.join("\n")}` }, ...(out.content || [])] };
   }
 
+  const output = args.output || DEFAULT_OUTPUT; delete args.output;
+  const before = cachedTree(args.app);
+
   if (TARGETABLE.has(name) && args.find) {
     const { last, log } = await runBatch(args.app, [{ tool: name, args: { ...args, find: undefined, role: undefined, nth: undefined }, find: args.find, role: args.role, nth: args.nth }], { finalState: false });
-    const out = await finish(last || { content: [] }, wantShot);
-    return { ...out, content: [{ type: "text", text: log.join("\n") }, ...(out.content || [])] };
+    const out = await finish(renderResult(last || { content: [] }, before, output), wantShot);
+    return withNotes({ ...out, content: [{ type: "text", text: log.join("\n") }, ...(out.content || [])] }, args.app);
   }
   delete args.find; delete args.role; delete args.nth;
 
   if (name === "press_key" && args.repeat) {
     const { last, log } = await runBatch(args.app, [{ tool: "press_key", args: { app: args.app, key: args.key }, repeat: args.repeat }], { finalState: false });
-    const out = await finish(last || { content: [] }, wantShot);
-    return { ...out, content: [{ type: "text", text: log.join("\n") }, ...(out.content || [])] };
+    const out = await finish(renderResult(last || { content: [] }, before, output), wantShot);
+    return withNotes({ ...out, content: [{ type: "text", text: log.join("\n") }, ...(out.content || [])] }, args.app);
   }
   delete args.repeat;
 
   const r = await callUpstream(name, args);
   if (name === "list_apps") return r;
-  return withNotes(await finish(r, wantShot), args.app);
+  return withNotes(await finish(renderResult(r, before, output), wantShot), args.app);
 }
 
 // ---------- alt akış (Claude Code) ----------
