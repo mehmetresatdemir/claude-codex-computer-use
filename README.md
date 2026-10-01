@@ -106,7 +106,7 @@ Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 Gereksinimler: macOS 14.4+, **ChatGPT.app (Codex) kurulu ve açık**, Node ≥ 22.14 (nvm ile `nvm install 22`; v22.20.0 ile test edildi), Claude Code 2.1.2xx+.
 
 ```bash
-git clone https://github.com/<kullanici>/claude-codex-cua-plus.git
+git clone https://github.com/mehmetresatdemir/claude-codex-cua-plus.git
 cd claude-codex-cua-plus
 ./scripts/install.sh
 ```
