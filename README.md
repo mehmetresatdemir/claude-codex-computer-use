@@ -2,6 +2,51 @@
 
 **Codex'in (ChatGPT.app) yerel Computer Use motorunu Claude Code'dan, Codex kotası harcamadan ve toplu komutlarla kullanmak.**
 
+<details>
+<summary><b>English summary</b> (the rest of this README is in Turkish)</summary>
+
+### What this is
+
+A thin, dependency-free MCP server (`server.mjs`, Node ≥ 22.14) that sits in front of [songkeys/claude-codex-computer-use](https://github.com/songkeys/claude-codex-computer-use) and lets **Claude Code drive macOS apps through the Computer Use engine that ships with OpenAI's ChatGPT/Codex desktop app**. Claude makes every decision; Codex only supplies the "eyes and hands" (screenshot + accessibility tree, click, type, keys). **No OpenAI model is called and no Codex quota is consumed** — verified by watching the processes with `lsof` during live calls (zero TCP connections; the client talks to the local service over a Unix socket) and by scanning the binaries for endpoints (telemetry/feature-flag and auth/profile only, no model API).
+
+### Why the bridge is needed
+
+Launching `SkyComputerUseClient` directly from Claude Code fails with `-10000: Sender process is not authenticated` — the service checks the launcher's process ancestry. The bridge starts the client through the signed `codex sandbox` launcher inside ChatGPT.app, which the service accepts. `codex sandbox` is just a launcher; it opens no model session.
+
+### What the wrapper adds
+
+Measured latency of the engine itself: warm `get_app_state` ≈ 70 ms, `list_apps` ≈ 10 ms. The slowness comes from spending one model round-trip (plus a 159 KB screenshot) per action. So the wrapper cuts round-trips:
+
+| Feature | Effect |
+|---|---|
+| `batch` — run a list of actions, return only the final state | N round-trips → 1 |
+| `include_screenshot` on every tool, **default off** | 159 KB → ~3 KB per reply |
+| `press_key.repeat` | e.g. 15× `shift+Down` in one call |
+| `open_path_in_dialog` — ⌘⇧G → path → Return (→ Return) in any Open/Save panel | 5 calls → 1 |
+| Auto-launch ChatGPT.app on `-10005 app-server exited`, retry once | no manual fix |
+| Idle timeout 60 s → 10 min; clean SIGTERM shutdown of the child tree | no cold starts, no orphans |
+
+Real task (Freeform: open board → Insert → Choose File → go to path → insert → delete copy): 7 model turns by hand → **5.6 s with zero intermediate turns**.
+
+### Install
+
+Requires macOS 14.4+, ChatGPT.app with Computer Use installed **and running**, Node ≥ 22.14, Claude Code.
+
+```bash
+git clone https://github.com/mehmetresatdemir/claude-codex-cua-plus.git
+cd claude-codex-cua-plus && ./scripts/install.sh   # finds paths, registers the MCP server as codex-computer-use
+```
+Then start a new Claude Code session. Tools appear as `mcp__codex-computer-use__*`.
+
+### Known limits
+
+- ChatGPT.app must be running (the service hangs off its `codex app-server`).
+- In canvas apps like Freeform, `drag` and `set_value` on handles do **not** move shapes (synthetic instant drags are ignored). Workaround used here: render the picture to a PNG and insert it via *Insert > Choose File* (`examples/`).
+- Coordinates are in the original screen resolution, not the downscaled screenshot.
+- Repro scripts: `scripts/bench.py` (latency), `scripts/net_check.sh` (network), `examples/freeform_insert_image.py` (end-to-end without Claude). Day log: `docs/gunluk-2026-10-01.md` (Turkish).
+
+</details>
+
 Bu depo bir günlük bir çalışmanın çıktısıdır (2026-10-01): Codex uygulamasıyla gelen macOS Computer Use bileşenini Claude Code'a bağladık, "kimlik doğrulanmamış gönderici" hatasını çözdük, kota harcanıp harcanmadığını ağ izlemesiyle ölçtük, hızını kıyasladık ve üstüne hızı ~7 kat artıran ince bir sarmalayıcı MCP sunucusu yazdık. Yol boyunca öğrenilen her şey burada.
 
 > Kararları veren model **Claude**'dur. Codex'ten yalnızca "gözler ve eller" (ekran + erişilebilirlik ağacı okuma, tıklama, yazma) kullanılır. OpenAI modeli çağrılmaz.
