@@ -1,4 +1,4 @@
-# claude-codex-cua-plus
+# claude-codex-computer-use
 
 **Codex'in (ChatGPT.app) yerel Computer Use motorunu Claude Code'dan, Codex kotası harcamadan ve toplu komutlarla kullanmak.**
 
