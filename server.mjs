@@ -18,7 +18,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -431,7 +431,7 @@ async function waitFor(app, { text, timeout_ms = 4000, absent = false }, state) 
   let last;
   while (Date.now() < deadline) {
     last = await callUpstream("get_app_state", { app });
-    const t = resultText(last); state.lastTree = t;
+    const t = resultText(last); state.lastTree = t; state.lastResultObj = last;
     const present = t.toLowerCase().includes(String(text).toLowerCase());
     if (present !== absent) return { ok: true, result: last };
     await sleep(150);
@@ -498,11 +498,13 @@ async function runBatch(app, actions, { finalState = true, autoRecover = true, c
       log.push(`${label} ok (${ms})${r.note ? ` ${r.note}` : ""}`);
     } catch (e) { log.push(`${label} HATA (${Date.now() - ts} ms): ${e.message}`); failed = true; break; }
   }
-  if (finalState && app) {
+  // Son eylem zaten tam ağaç döndürdüyse (click/press_key/wait_for sonucu) ekstra okuma yapma (~120 ms).
+  const lastIsFresh = !failed && last && looksLikeTree(resultText(last)) && !isSoftError(last);
+  if (finalState && app && !lastIsFresh) {
     const st = await callUpstream("get_app_state", { app });
     if (!isSoftError(st) || !last) last = st;
   }
-  log.push(`toplam ${Date.now() - t0} ms${state.requeried ? `, ${state.requeried} re-query` : ""}`);
+  log.push(`toplam ${Date.now() - t0} ms${state.requeried ? `, ${state.requeried} re-query` : ""}${lastIsFresh && finalState ? " (son okuma atlandı)" : ""}`);
   return { last, log, before, failed };
 }
 // batch benzeri sonuçları ortak biçimde paketle (full / diff).
@@ -530,7 +532,7 @@ async function openPathInDialog(app, args, state) {
   if (!w.ok) return { ok: false, last: w.result, log: ["Go to Folder alanı açılmadı; bir Aç/Kaydet paneli açık mı?"] };
   const m = state.lastTree.match(/^\s*(\d+) text field .*PathTextField/m);
   await callUpstream("set_value", { app, element_index: m[1], value: args.path });
-  await sleep(150);
+  await sleep(60);
   await callUpstream("press_key", { app, key: "Return" });
   const base = String(args.path).replace(/\/+$/, "").split("/").pop();
   await waitFor(app, { text: "PathTextField", timeout_ms: 3000, absent: true }, state);
@@ -538,16 +540,19 @@ async function openPathInDialog(app, args, state) {
   log.push(`go-to: ${sel.ok ? `'${base}' listede` : `'${base}' listede görünmedi`}`);
   let last = sel.result;
   if (args.confirm !== false && sel.ok) {
+    // Seçim doğrulandı; Return (~0,5 s) tıklamadan (~1 s) hızlı. Panel kapanmazsa OK düğmesine tıkla.
     const ok = findInTree(state.lastTree, "/\\bOKButton\\b/", {}).hit || findInTree(state.lastTree, "/^button (Insert|Open|Save|Choose)\\b/", {}).hit;
-    if (ok && !/\(disabled\)/.test(ok.rest)) {
-      last = await callUpstream("click", { app, element_index: ok.index });
-      log.push(`confirm: [${ok.index}] ${ok.rest.slice(0, 40)}`);
-      await waitFor(app, { text: "open-panel", timeout_ms: 3000, absent: true }, state);
-    } else { last = await callUpstream("press_key", { app, key: "Return" }); log.push("confirm: Return (düğme bulunamadı)"); }
-    await sleep(300);
+    if (ok && /\(disabled\)/.test(ok.rest)) { log.push(`confirm: [${ok.index}] düğme pasif`); }
+    else {
+      last = await callUpstream("press_key", { app, key: "Return" });
+      let closed = await waitFor(app, { text: "open-panel", timeout_ms: 1500, absent: true }, state);
+      if (closed.ok) log.push("confirm: Return");
+      else if (ok) { last = await callUpstream("click", { app, element_index: ok.index }); closed = await waitFor(app, { text: "open-panel", timeout_ms: 3000, absent: true }, state); log.push(`confirm: Return kapatmadı → click [${ok.index}] ${ok.rest.slice(0, 30)}`); }
+      if (!closed.ok) log.push("uyarı: panel hâlâ açık görünüyor");
+    }
   }
-  last = await callUpstream("get_app_state", { app });
-  state.lastTree = resultText(last);
+  if (!(state.lastTree && looksLikeTree(state.lastTree))) { last = await callUpstream("get_app_state", { app }); state.lastTree = resultText(last); }
+  else last = state.lastResultObj || last;
   return { ok: sel.ok, last, log };
 }
 

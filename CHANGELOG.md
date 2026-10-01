@@ -1,5 +1,11 @@
 # Değişiklikler
 
+## 0.4.1 — 2026-10-02
+
+- **Gecikme ölçümü**: tıklama ~650–1500 ms, arayüzü değiştirmeyen tuş ~10 ms, değiştiren tuş ~500 ms; taban maliyet servisin eylem sonrası "otur" beklemesi (uygulamadan bağımsız, ayarlanamıyor; boru hattı kazandırmıyor). Tablo README'de.
+- `open_path_in_dialog`: seçim doğrulandıktan sonra OK'a tıklamak yerine Return (yaklaşık 0,5 s kazanç); panel kapanmazsa düğmeye tıklama yedeği. Sabit beklemeler kısaltıldı.
+- `batch`/`run_macro`: son eylem tam ağaç döndürdüyse ekstra `get_app_state` atlanır (~120 ms).
+
 ## 0.4.0 — 2026-10-02
 
 - **`compact` diff** (varsayılan açık): kaydırma çubuğu, ok/sayfa düğmeleri, tutamaç, ayırıcı ve başlıksız image/text/cell satırları diff'ten gizlenir; gizlenen sayı yazılır. Gerçek koşuda +38/−47 satırlık diff'in çoğu buydu.

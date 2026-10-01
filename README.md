@@ -135,6 +135,18 @@ Dışarıya bağlı görünen `codex` süreçleri ChatGPT.app'in kendi `app-serv
 | `get_app_state` sıcak | **~70 ms** |
 | `list_apps` | ~10 ms |
 
+Eylem başına gecikme (2026-10-02, köprüye doğrudan, Freeform ve Calculator):
+
+| Eylem | Süre | Not |
+|---|---|---|
+| `press_key`, `type_text`, `scroll` — arayüz **değişmiyorsa** | 8–20 ms | |
+| `press_key` — arayüz değişiyorsa (ör. ⌘+ zoom) | ~450–600 ms | |
+| `click` (öğe veya koordinat) | ~650–1500 ms | Calculator'da da ~650 ms taban |
+| `perform_secondary_action` | ~670–1600 ms | |
+| İki tıklamayı beklemeden art arda göndermek | kazanç yok (2134 vs 2423 ms) | istemci sıraya koyuyor |
+
+Taban maliyet, servisin eylemden sonra **arayüzün oturmasını beklemesi** (`needsUISettleBeforeSkyshot`, `userInteractionDebounceDuration`): ~500 ms, uygulamadan bağımsız, dışarıdan ayarlanamıyor (`cua mcp` bayrak almıyor, UserDefaults anahtarı yok). Bu yüzden sarmalayıcı bu beklemeyi **daha az kez** ödemeye çalışır: arayüzü değiştirmeyen tuşları tercih et (Return ile onay ~0,5 s, OK düğmesine tıklamak ~1 s), son eylem tam ağaç döndürdüyse ekstra `get_app_state` yapma, sabit `sleep` yerine `wait_for`.
+
 Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmasından geliyor: ağaç + 159 KB ekran görüntüsü modele gider, model düşünür, cevabı yazar, bir sonraki tek eylemi gönderir. Codex uygulamasının kendi döngüsü arada metin üretmeden sıkı çalıştığı için daha hızlı görünür.
 
 Çözüm: model turlarını azaltmak → sarmalayıcı.
@@ -172,6 +184,7 @@ Ortam değişkenleri: `CUA_PLUS_NPX` (npx yolu), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 | `batch` (indeksle) + `open_path_in_dialog` (v0.1) | 3 | 5,6 sn |
 | `batch` (**find** + **wait_for**) + `open_path_in_dialog` (v0.2) | 2 | 8,4 sn* |
 | `run_macro("freeform_insert", {board, path})` (v0.3) | **1** | 6,8 sn |
+| aynı makro, Return ile onay + son okuma atlama (v0.4.1) | **1** | **5,4 sn** |
 
 \* v0.2'de süre biraz daha uzun çünkü her adım doğrulanıyor (`wait_for`, listede seçim beklemesi, OK düğmesini ağaçtan bulma); karşılığında kör Return'ün ekleme yapmadan geçtiği durum ortadan kalktı. `menu` ile üçgen ekleme: 2,4 sn, 1 çağrı. `recover` ile açık menüyü kapatma: 1,9 sn.
 
