@@ -57,3 +57,7 @@
 ## 0.1.0 — 2026-10-01
 
 - İlk sürüm: `batch`, `press_key.repeat`, `open_path_in_dialog`, isteğe bağlı ekran görüntüsü, idle 10 dk, `-10005`'te ChatGPT.app'i otomatik açma, temiz kapanma.
+
+## 0.6.1 — 2026-10-02
+
+- Freeform notlarına Codex'in karmaşık görevinden öğrenilen: seçili öğe `shift+ok` ile taşınır (drag yerine), Sticky Note/Text Box ekleyip `type_text`, Escape düzenlemeyi bitirir. Görev kaydı: 3 uygulama, 25 `js` çağrısı, 100 sn, 11 model turu, ↑1,1 MB; rapor dosyası diske doğru yazıldı.

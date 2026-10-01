@@ -19,7 +19,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.6.0";
+const VERSION = "0.6.1";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -173,6 +173,7 @@ const BUILTIN_NOTES = {
     "drag ve tutamaçlara set_value şekilleri taşımaz/boyutlandırmaz (sentetik sürükleme yoksayılır). Resimleri dosya olarak ekle (Insert > Choose File).",
     "Pano içinde Escape 'All Boards' görünümüne döndürebilir. Menü çubuğu 'Insert' öğesi tam eşleşmeyle bulunur; alt menü öğeleri (Shape > Triangle) aynı ağaçta görünür.",
     "Quick Look açıksa Escape kapatmayabilir; 'close panel button' öğesine tıkla.",
+    "Öğe taşıma: drag çalışmaz ama seçili öğe klavyeyle taşınır — press_key 'shift+Right'/'shift+Down' repeat ile (10 pt/adım; Codex 30×shift+Right kullandı). Sticky Note: Insert > Sticky Note sonra type_text; Text Box: Insert > Text Box sonra type_text; Escape düzenlemeyi bitirir.",
   ],
   "textedit": [
     "Belge gövdesi 'text entry area (settable) First Text View'; type_text find=\"First Text View\" ile yaz. Yeni belge RTF'tir: .txt istersen yazmadan önce super+shift+t (Make Plain Text), yoksa ada .rtf eklenir.",
