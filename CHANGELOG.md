@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 — 2026-10-02
+
+Second pass over Codex Computer Use, this time inside the service itself (binary, Statsig store, live `log stream`). Findings are in `docs/codex-computer-use-mimarisi.md` §6.
+
+- **`scripts/service_trace.py`**: turns a `log stream` capture of `SkyComputerUseService` into a per-request table of settle wait / screenshot capture / tree serialization. Measured: UI-changing action ≈ 0.42 s settle + 25 ms capture + 10 ms tree (≈ 0.45–0.56 s), first action after `get_app_state` ≈ 0.9 s, modifier-only key or no-op scroll 1–3 ms with no capture, plain observation ≈ 60 ms. Every action is preceded by a ~0 ms policy request.
+- Decoded the service's Statsig config (`ui_settle_poll_interval_milliseconds = 50`, JPEG 0.8 at point resolution, `ax_prefetch_enabled = false`, browser URL domain list), the feature keys it consults (`feature/axTreeDiffing`, `…RemovedElementIDRanges`, `feature/skyshotClassifier`, `feature/computerUseCursor`), the full IPC request catalogue (Computer Use, Messages, Skysight, EventStream/Record & Replay, audio) and the bundled app-instruction catalogue (Slack, Notion, Spotify, iPhone Mirroring, Apple Music, Numbers, Clock). The MCP client delivers those once per bundle id; our notes fill the apps it doesn't cover.
+- Built-in notes: Calculator (result lives under "Edit field" with invisible bidi marks; read with `app.lastTextUnder`), Open/Save panels (⌘⇧G path field, `saveAsNameTextField`).
+- Working rule confirmed by the numbers: send text with one `type_text` (one settle per call, not per character); don't sleep after actions; observation is cheap, actions are not.
+
 ## 0.7.1 — 2026-10-02
 
 - **6-cube (hexeract) drawn in Freeform**: 64 vertices, 192 edges, 12-gon Petrie projection, one `script` call, 22 pen paths, 353 actions, 309 s (`examples/scripts/freeform_hexeract.js`, `docs/example-hexeract.jpg`). Lesson that went into the Freeform notes: the pen tool treats a second click on a point already in the current path as selecting/closing, so an Euler circuit must be split into vertex-unique trails (share the last vertex between trails).

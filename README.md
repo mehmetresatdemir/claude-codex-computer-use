@@ -23,7 +23,7 @@ Same name as the bridge, different project: this repo does not modify the bridge
 
 - **No Codex quota is consumed.** During live calls the bridge, client and service processes opened zero TCP connections (`lsof -i`, 10 s sampling, repeated across sessions); the client talks to the local service over a Unix socket; binaries contain only telemetry/feature-flag and auth/profile endpoints, no model API. Reproduce with `scripts/net_check.sh`.
 - **Why the bridge is needed.** Launching `SkyComputerUseClient` directly fails with `-10000: Sender process is not authenticated` — the service checks the launcher's process ancestry. The bridge starts the client through the signed `codex sandbox` launcher inside ChatGPT.app. `codex sandbox` is only a launcher; it opens no model session.
-- **The engine is fast; the loop was slow.** Warm `get_app_state` ≈ 70–120 ms, `list_apps` ≈ 10 ms, keys that don't change the UI ≈ 10 ms. A click costs ≈ 0.7–1.5 s because the service waits for the UI to settle before capturing (its docs: "about 1 second, up to 5 s if the app shows a loading indicator"). That wait is inside the signed service and cannot be tuned; what can be removed is the model round trip per action.
+- **The engine is fast; the loop was slow.** Measured inside the service with `log stream` (`scripts/service_trace.py`): every action is two IPC requests, a ~0 ms policy check and the action itself. A UI-changing action (click, Escape, `type_text`) costs ≈ 0.42 s settle wait (polled at 50 ms, Statsig `ui_settle_poll_interval_milliseconds`) + ≈ 25 ms ScreenCaptureKit capture + ≈ 10 ms accessibility tree, ≈ 0.45–0.56 s in total; the first action after `get_app_state` ≈ 0.9 s (window activation). Modifier-only keys and no-op scrolls return in 1–3 ms without a capture; a plain `get_app_state` ≈ 60 ms. The wait lives inside the signed service and cannot be tuned; what can be removed is the model round trip per action.
 
 ## Head-to-head: the same task on Codex and on this wrapper
 
@@ -90,11 +90,12 @@ server.mjs                          the wrapper (single file, no dependencies)
 scripts/install.sh                  finds paths, registers the MCP server, installs example macros
 scripts/bench.py                    latency measurement against the bridge or the wrapper
 scripts/net_check.sh                network check during live calls
+scripts/service_trace.py            per-request settle/capture/tree timings from a `log stream` capture
 examples/scripts/multi_app_task.js  Freeform + Calculator + TextEdit in one script call
 examples/scripts/freeform_penteract.js  5-cube (80 edges) drawn with the pen tool in one call
 examples/macros/*.json              freeform_insert, textedit_write_save
 examples/freeform_insert_image.py   end-to-end driver without Claude (Python → wrapper)
-docs/codex-computer-use-mimarisi.md architecture analysis of Codex Computer Use (Turkish)
+docs/codex-computer-use-mimarisi.md architecture analysis of Codex Computer Use, incl. service internals, Statsig config, app-instruction catalogue (Turkish)
 docs/gunluk-2026-10-01.md           day-one log, dead ends included (Turkish)
 ```
 

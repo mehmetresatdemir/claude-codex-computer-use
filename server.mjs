@@ -19,7 +19,7 @@ const DEFAULT_SCREENSHOT = (process.env.CUA_PLUS_DEFAULT_SCREENSHOT ?? "false") 
 const KEY_DELAY_MS = Number(process.env.CUA_PLUS_KEY_DELAY_MS ?? 40);
 const CODEX_APP_NAME = process.env.CUA_PLUS_APP_NAME || "ChatGPT"; // Codex uygulamasının macOS adı
 const SCREENSHOT_MAX_PX = Number(process.env.CUA_PLUS_SCREENSHOT_MAX_PX ?? 1280); // 0 = küçültme
-const VERSION = "0.7.1";
+const VERSION = "0.7.2";
 
 const debug = (m) => { if (process.env.CUA_PLUS_DEBUG) process.stderr.write(`[cua-plus] ${m}\n`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -180,6 +180,12 @@ const BUILTIN_NOTES = {
     "Belge gövdesi 'text entry area (settable) First Text View'; type_text find=\"First Text View\" ile yaz. Yeni belge RTF'tir: .txt istersen yazmadan önce super+shift+t (Make Plain Text), yoksa ada .rtf eklenir.",
     "Save panelinde ad alanı 'text field (settable) … ID: saveAsNameTextField'; 'Save As:' ayrı bir etiket. Klasöre super+shift+g ile git. Kaydedince pencere başlığı dosya adı olur; wait_for'da kapanış tırnağı kullanma (Window: \"ad).",
     "Açılışta belge yoksa Open paneli gelir: 'New Document' düğmesine tıkla.",
+  ],
+  "calculator": [
+    "Sonuç 'Edit field' öğesinin altındaki son metin satırında; görünmez bidi işaretleri (U+200E/F) ve yerel binlik ayracı içerir. script'te app.lastTextUnder(ax, \"Edit field\") ile oku. İşlemi tek type_text ile gönder (ör. \"37*41=\"); tuş tuş gönderme (her tuş ~0,5 s bekleme öder).",
+  ],
+  "open/save panel": [
+    "Aç/Kaydet panelinde klasöre gitmek için super+shift+g → yol alanı (PathTextField) → Return; seçimi 'Value: <dosya>' ile doğrula, sonra Return (düğmeye tıklamaktan hızlı). Kaydet adı alanı 'saveAsNameTextField'. open_path_in_dialog aracı bu akışı tek adımda yapar.",
   ],
 };
 function notesFor(app) {

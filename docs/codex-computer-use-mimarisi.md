@@ -58,3 +58,51 @@ Değiştiremediklerimiz: imzalı istemci ve servis (otur beklemesi, drag'in tuva
 3. Uygulama sorunlarını önce `notes` ile yakala (Freeform: drag yok, AXPress resimde Quick Look, Escape panodan çıkar).
 4. `-10012/-10016` görürsen dur; kullanıcı araya girmiştir.
 5. `-10005` iki anlama gelir: `app-server exited` (ChatGPT.app kapalı) veya `timeoutReached` (ağaç çok büyük/yavaş, ör. Safari). İkincisinde uygulamayı açmaya çalışma; koordinat/daha küçük hedef kullan.
+
+## 6. Servisin içi: ikili dosya, Statsig yapılandırması ve canlı log (2026-10-02, ikinci geçiş)
+
+Kaynaklar: `~/.codex/computer-use/Codex Computer Use.app` (sürüm 26.924.1001281; `codesign`, `strings`, `nm`), servis tercihleri `com.openai.sky.CUAService.plist` içindeki Statsig yerel deposu (953 KB JSON), `/usr/bin/log stream --level debug` ile sarmalayıcı üzerinden yapılan ölçümlü eylemler. Hiçbir şey değiştirilmedi; kimlik doğrulama yoluna dokunulmadı.
+
+### 6.1 Paket ve yetkiler
+
+- `SkyComputerUseService` (23,8 MB Swift, 161 k sembol) + `SharedSupport/` altında üç yardımcı uygulama: **Installer**, **SkyComputerUseClient** (MCP istemcisi, 14,8 MB) ve **CUALockScreenGuardian** (ekran kilidi bekçisi; `com.apple.screenIsLocked/Unlocked` bildirimlerini izler, kilitliyken `-10020 screenLocked` döner).
+- Entitlement'lar: `application-groups` (grup kabı `2DC432GLL2.com.openai.sky.CUAService`, soketin yeri), `automation.apple-events`, `personal-information.addressbook` (Messages araçları için kişi çözümleme), `keychain-access-groups`. Takım kimliği `2DC432GLL2`.
+- Servis yalnızca Computer Use değil; aynı IPC üzerinde **Messages** (chat bul/oku/ara/gönder/say), **Skysight** (arka plan etkinlik akışı ve bellek özetleri), **EventStream** (kayıt & tekrar oynatma, "Record & Replay"), ses kaydı ve Calendar yer tutucusu da var. İstek tipleri: `AppStart/Stop/Modify/Usage`, `AppPolicy`, `AppGetSkyshot`, `AppPerformAction`, `AppStartCapture` + `AppNextCaptureUpdate` (akış halinde yakalama), `FrontmostWindow`, `ListApps`, `CodexTurnEnded`, `CodexStatusItemMenuState`, `EventStreamStart/Status/Stop`, `Messages*`, `Skysight*`, `Start/StopAudioRecording`. MCP istemcisi bunlardan yalnızca 10 Computer Use aracını, Messages araçlarını, `computer_history_*` ve kayıt araçlarını dışarı açıyor; akış halinde yakalama ve `FrontmostWindow` MCP'de yok.
+
+### 6.2 Servisin okuduğu bayraklar ve Statsig değerleri
+
+Canlı logda servis her istekte şu UserDefaults anahtarlarına bakıyor (hiçbiri tanımlı değil, yani varsayılanlar geçerli): `feature/axTreeDiffing`, `feature/axTreeDiffingRemovedElementIDRanges`, `feature/skyshotClassifier`, `feature/computerUseCursor`, `ComputerUseAllowForbiddenTargets`. Statsig deposundaki dinamik yapılandırmalar (ad yerine hash; değerler okunabilir):
+
+| Değer | Anlamı |
+|---|---|
+| `ui_settle_poll_interval_milliseconds = 50`, `primary_window_poll_interval_milliseconds = 50` | Eylem sonrası "oturdu mu" kontrolü ve ana pencere takibi 50 ms adımlarla yoklanıyor. |
+| `should_use_jpeg = true`, `jpeg_compression_quality = 0.8`, `should_normalize_screenshot_to_point_resolution = true` | Ekran görüntüsü JPEG %80 ve **nokta çözünürlüğüne** indirgenmiş (Retina 2× piksel değil). Sarmalayıcımızın 1280 px/%70 küçültmesi bunun üstüne geliyor. |
+| `ax_prefetch_enabled = false` | AX ağacını önceden çekme kapalı. |
+| `domains: [github.com, slack.com, notion.so, figma.com, docs.google.com, … ] + urls: [accounts.google.com/v3/signin/, id.atlassian.com/login]` | Tarayıcı URL politikası listesi: bu alanlarda oturum "Computer Use is not allowed on the current browser URL" ile durduruluyor ya da farklı akışa yönlendiriliyor. |
+| `chrome_extension_install_enabled = true` | Tarayıcı için uzantı yolu tercih ediliyor. |
+
+Ağaç diff'i serviste bir **özellik kapısı**: metinler servis ikilisinde ("The following is a diff from the previous accessibility tree", "Removed element IDs:", "There has been no change in the accessibility tree for …"). MCP yolunda eylem yanıtı ağaç içermiyor; istemcinin sabit metni "Action completed. Call `get_app_state` to fetch the updated UI state." Yani Codex'in REPL yolu *eylem + gözlem*i tek çağrıda alırken MCP yolu iki çağrı istiyor; sarmalayıcımız eylemin ardından kendi `get_app_state`'ini çağırıp diff'i üretiyor.
+
+### 6.3 Uygulamaya özel talimat kataloğu
+
+`Package_ComputerUse.bundle/Contents/Resources/AppInstructions/` altında yedi dosya: Slack, Notion, Spotify, iPhone Mirroring, Apple Music, Numbers, Clock (0,3–3,6 KB Markdown). İçerik tarzı: uygulamanın tuzakları ("Slack'te Return mesajı gönderir, `set_value` kullan"), hangi aracın hangi işe yaradığı, ve "sonuç gecikmeli gelir, uyumak yerine `get-state`'i tekrar çağır" türü sabır kuralları. MCP istemcisi bunları bundle başına bir kez `<app_specific_instructions>` olarak ekliyor (`bundleIdentifiersWithDeliveredInstructions`). Freeform, TextEdit, Calculator, Finder için talimat yok; bizim `notes.json`/yerleşik notlarımız tam bu boşluğu dolduruyor ve aynı tarzda yazılmalı: tuzak → doğru araç → doğrulama.
+
+Onay kalıcılığı istemcide (`AppApprovalStore`, `persistentApprovals`, `persistentApprovalsModificationDate`); kalıcı onay yazılamazsa "Computer Use could not persist the approval permanently for app …" döner. Politika yanıtı `decision ∈ {allowed, denied, forbidden}`, `riskLevel`, `warningSubtitle`, `allowPersistentApproval`.
+
+### 6.4 Bir eylemin zaman çizelgesi (canlı log, Freeform "All Boards")
+
+`scripts/service_trace.py` log akışını istek başına **bekleme / yakalama / ağaç** olarak ayırır. Her eylem serviste **iki IPC işlemi**: önce ~0–1 ms'lik politika kontrolü, sonra eylemin kendisi.
+
+| Eylem | Bekleme (otur) | Yakalama (ScreenCaptureKit) | Ağaç + serileştirme | Toplam |
+|---|---|---|---|---|
+| `press_key shift` (yalnızca değiştirici) | – | – | – | 1–3 ms (ekran görüntüsü alınmıyor) |
+| `scroll` kaydırılacak öğe yokken | – | – | – | 1–3 ms |
+| `press_key Escape` | 415–522 ms | 23–28 ms | 9–12 ms | 453–560 ms |
+| `click` boş tuval | 423–438 ms | 23–27 ms | 8–11 ms | 455–473 ms |
+| `click` — `get_app_state` sonrası **ilk** eylem | 862 ms | 32 ms | 12 ms | 906 ms (pencere etkinleştirme) |
+| `type_text "abc"` | 415–444 ms | 26–31 ms | 9–11 ms | 450–486 ms (karakter başına değil, çağrı başına) |
+| `get_app_state` (salt gözlem) | 17–20 ms | 22–25 ms | 13–30 ms | 53–75 ms |
+
+Çıkarımlar: (1) "Otur" beklemesi yaklaşık **0,42 s taban + 50 ms yoklama**; sabit 1 s değil. Uygulama meşgulse (`AXElementBusyChanged`, `AXProgressIndicator`) 5 s'ye kadar uzar. (2) Değiştirici tuş ve etkisiz kaydırma hiç beklemiyor; `type_text` tüm metin için tek bekleme ödüyor → metni tek `type_text` ile gönder, tuş tuş değil. (3) Gözlem ucuz (~60 ms); pahalı olan eylem sonrası bekleme. (4) Bir uygulamada ilk eylem ~0,9 s; sonrakiler ~0,5 s. 6-küp (353 eylem, 309 s ≈ 0,87 s/eylem) bu tabana `getAXState` çağrıları ve kalem yolu başına menü tıklamaları eklenince çıkıyor.
+
+Servisin kendi mesajları `<private>` olarak maskeli; yukarıdaki süreler Apple alt sistemlerinin (XPC transaction, ScreenCaptureKit, ReplayKit) zaman damgalarından türetildi. Olay enjeksiyonu için `kTCCServiceListenEvent`/`kTCCServiceAppleEvents` kontrolleri yalnızca oturum başında bir kez yapılıyor.

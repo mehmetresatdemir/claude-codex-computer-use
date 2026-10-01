@@ -1,5 +1,14 @@
 # Değişiklikler
 
+## 0.7.2 — 2026-10-02
+
+Codex Computer Use'un ikinci incelemesi, bu kez servisin kendi içinde (ikili dosya, Statsig deposu, canlı `log stream`). Bulgular `docs/codex-computer-use-mimarisi.md` §6'da.
+
+- **`scripts/service_trace.py`**: `SkyComputerUseService` log akışını istek başına bekleme / ekran yakalama / ağaç tablosuna çevirir. Ölçüm: UI'yi değiştiren eylem ≈0,42 s bekleme + 25 ms yakalama + 10 ms ağaç (≈0,45–0,56 s); `get_app_state` sonrası ilk eylem ≈0,9 s; yalnızca değiştirici tuş veya etkisiz kaydırma 1–3 ms (ekran görüntüsü yok); salt gözlem ≈60 ms. Her eylemin önünde ~0 ms'lik politika isteği var.
+- Servisin Statsig yapılandırması çözüldü (`ui_settle_poll_interval_milliseconds = 50`, JPEG 0,8 nokta çözünürlüğü, `ax_prefetch_enabled = false`, tarayıcı URL alan listesi), danıştığı özellik anahtarları, tam IPC istek kataloğu (Computer Use, Messages, Skysight, EventStream/Record & Replay, ses) ve paketli uygulama talimatı kataloğu (Slack, Notion, Spotify, iPhone Mirroring, Apple Music, Numbers, Clock). MCP istemcisi bunları bundle başına bir kez veriyor; notlarımız kapsamadığı uygulamaları tamamlıyor.
+- Yerleşik notlar: Calculator (sonuç "Edit field" altında, görünmez bidi işaretleriyle; `app.lastTextUnder` ile oku), Aç/Kaydet panelleri (⌘⇧G yol alanı, `saveAsNameTextField`).
+- Sayıların doğruladığı kural: metni tek `type_text` ile gönder (bekleme çağrı başına, karakter başına değil); eylem sonrası uyuma; gözlem ucuz, eylem pahalı.
+
 ## 0.6.0 — 2026-10-02
 
 - **`script` aracı** — Codex'in `cua_repl`'ine denk kalıcı JavaScript ortamı (`node:vm`): `cua.getApp`, `app.click(idx | [x,y] | {find})`, `pressKey`, `typeText`, `setValue`, `scroll`, `drag`, `secondary`, `getAXState()` (ağaç modele gönderilmez, değişkende kalır), `find/findAll`, `waitFor`, `sleep`, `log`. Kod yerelde döngüyle çalışır; tıklama başına model turu yoktur. Sonuç: log + son ağacın diff'i (+ görüntü).

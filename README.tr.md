@@ -152,7 +152,7 @@ Eylem başına gecikme (2026-10-02, köprüye doğrudan, Freeform ve Calculator)
 | `perform_secondary_action` | ~670–1600 ms | |
 | İki tıklamayı beklemeden art arda göndermek | kazanç yok (2134 vs 2423 ms) | istemci sıraya koyuyor |
 
-Taban maliyet, servisin eylemden sonra **arayüzün oturmasını beklemesi** (`needsUISettleBeforeSkyshot`, `userInteractionDebounceDuration`): ~500 ms, uygulamadan bağımsız, dışarıdan ayarlanamıyor (`cua mcp` bayrak almıyor, UserDefaults anahtarı yok). Bu yüzden sarmalayıcı bu beklemeyi **daha az kez** ödemeye çalışır: arayüzü değiştirmeyen tuşları tercih et (Return ile onay ~0,5 s, OK düğmesine tıklamak ~1 s), son eylem tam ağaç döndürdüyse ekstra `get_app_state` yapma, sabit `sleep` yerine `wait_for`.
+Taban maliyet, servisin eylemden sonra **arayüzün oturmasını beklemesi** (`needsUISettleBeforeSkyshot`, `userInteractionDebounceDuration`): canlı servis logunda ölçüldü (`scripts/service_trace.py`) — UI'yi değiştiren eylemde ≈0,42 s bekleme (50 ms yoklama, Statsig `ui_settle_poll_interval_milliseconds`) + ≈25 ms ekran yakalama + ≈10 ms ağaç ≈ 0,45–0,56 s; `get_app_state` sonrası ilk eylem ≈0,9 s; değiştirici tuş ve etkisiz kaydırma 1–3 ms (ekran görüntüsü alınmaz); salt gözlem ≈60 ms. Uygulamadan bağımsız, dışarıdan ayarlanamıyor (`cua mcp` bayrak almıyor, UserDefaults anahtarı yok). Bu yüzden sarmalayıcı bu beklemeyi **daha az kez** ödemeye çalışır: arayüzü değiştirmeyen tuşları tercih et (Return ile onay ~0,5 s, OK düğmesine tıklamak ~1 s), son eylem tam ağaç döndürdüyse ekstra `get_app_state` yapma, sabit `sleep` yerine `wait_for`.
 
 Yani Codex'in motoru hızlı. Yavaşlık, her adımın bir **model turu** olmasından geliyor: ağaç + 159 KB ekran görüntüsü modele gider, model düşünür, cevabı yazar, bir sonraki tek eylemi gönderir. Codex uygulamasının kendi döngüsü arada metin üretmeden sıkı çalıştığı için daha hızlı görünür.
 
@@ -297,6 +297,7 @@ examples/macros/*.json           örnek makrolar (install.sh kurar): freeform_in
 scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?
+scripts/service_trace.py           servis logundan istek başına bekleme/yakalama/ağaç süreleri
 examples/freeform_insert_image.py  Claude'suz uçtan uca örnek (Python → sarmalayıcı)
 examples/draw_house.py             Pillow ile ev sahnesi
 examples/draw_sailboat.py          Pillow ile yelkenli sahnesi
