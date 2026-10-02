@@ -12,8 +12,9 @@ await ff.click({find:board, role:"layout item"}); await ff.nudge("down", 20);
 await ff.click([2300,1150]);
 ax = await ff.getAXState(); const items = ff.findAll(ax, /^(layout item|image) /); log("öğe sayısı:", items.length);
 const calc = await cua.getApp("Calculator");
-await calc.pressKey("Escape"); await calc.typeText("37*41"); await calc.pressKey("Return");
-const cax = await calc.getAXState(); const raw = calc.lastTextUnder(cax, "Edit field"); const result = raw ? raw.replace(/[^\d]/g, "") : null; log("37x41:", raw, "→", result);
+await calc.pressKey("Escape"); await calc.typeText("37*41=");          // one type_text = one settle wait; "=" evaluates
+let raw = null; for (let i = 0; i < 10; i++) { const cax = await calc.getAXState(); raw = calc.lastTextUnder(cax, "Edit field"); if (raw && !/[×*]/.test(raw)) break; await sleep(200); } // verify the result row changed
+const result = raw ? raw.replace(/[^\d]/g, "") : null; log("37x41:", raw, "→", result);
 const te = await cua.getApp("TextEdit");
 let tax = await te.getAXState(); if (te.find(tax, "New Document")) { await te.click({find:"New Document"}); } else { await te.pressKey("super+n"); }
 await te.waitFor("First Text View");

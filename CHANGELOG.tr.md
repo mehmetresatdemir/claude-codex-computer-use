@@ -1,5 +1,14 @@
 # Değişiklikler
 
+## 0.8.0 — 2026-10-02
+
+Beş paralel araştırma (JS kütüphanesi, 59 Codex oturumu, servis/istemci ikilileri, kendi kodumuz, host katmanı; raporlar `docs/research/`) ve 0.7.2 kod incelemesi bu sürümü şekillendirdi.
+
+- **Doğruluk**: her UI eyleminden sonra ağaç taze okunur (eylem yanıtı ağaç taşıyorsa o kullanılır, ek tur yok); geçersiz indeks / "user changed" yanıtında hedef yeniden çözülüp bir kez denenir. `findInTree`: `/Users/x` düz metin, `/re/g` eşleşme kaçırmıyor, İ/aksan katlama, `nth` tüm adaylarda, pasif öğeler sona, `role` sözcük eşleşmesi. `substitute` sayı tipini korur. `script`: zaman aşımı iptal bayrağı, vm-dışı RegExp tanıma, uygulama başına diff tabanı, 500 satır log sınırı.
+- **Protokol/süreç**: üst akıştan gelen `elicitation/create` vb. istekler istemciye aktarılıp yanıtlanır; 130 s zaman aşımı; hata kodları korunur; `tools/call` sıralı; köprü süreç grubuyla kapatılır; ortam değişkenleri süzülür; `-10000` artık ChatGPT.app'i açmaz.
+- **Yeni**: `paste` aracı ve `app.paste` (pano üzerinden); tuş adı normalizasyonu; `observe:false`; tam hata tablosu + düz metin hata açıklamaları; her sonuçta takılı menü notu; `_match` ve `_screenshot` not türleri; Finder/Unity/Simulator notları; `pen/refind/keys/deselect/raise/compact/tail/screenshot/help` yardımcıları ve takma adlar; `wait_for` `re` kabul eder.
+- **Kod**: `lib/pure.mjs` + `npm test` (14 test, servis gerekmez); görüntü boyutu başlıktan okunur; `tools/list` önbelleği; tüm çalışma zamanı metinleri İngilizce; bozuk `macros.json` asla ezilmez.
+
 ## 0.7.2 — 2026-10-02
 
 Codex Computer Use'un ikinci incelemesi, bu kez servisin kendi içinde (ikili dosya, Statsig deposu, canlı `log stream`). Bulgular `docs/codex-computer-use-mimarisi.md` §6'da.

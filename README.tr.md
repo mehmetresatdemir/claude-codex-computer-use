@@ -298,6 +298,8 @@ scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?
 scripts/service_trace.py           servis logundan istek başına bekleme/yakalama/ağaç süreleri
+lib/pure.mjs + test/               saf yardımcılar ve birim testleri (npm test)
+docs/research/                     beş derin inceleme raporu (Türkçe)
 examples/freeform_insert_image.py  Claude'suz uçtan uca örnek (Python → sarmalayıcı)
 examples/draw_house.py             Pillow ile ev sahnesi
 examples/draw_sailboat.py          Pillow ile yelkenli sahnesi

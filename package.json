@@ -1,0 +1,11 @@
+{
+  "name": "codex-cua-plus",
+  "version": "0.8.0",
+  "description": "Wrapper MCP server for Codex Computer Use from Claude Code (batch, script, diff, notes, macros)",
+  "type": "module",
+  "main": "server.mjs",
+  "bin": { "codex-cua-plus": "server.mjs" },
+  "scripts": { "test": "node --test test/", "check": "node --check server.mjs && node --check lib/pure.mjs" },
+  "engines": { "node": ">=22.14" },
+  "license": "MIT"
+}

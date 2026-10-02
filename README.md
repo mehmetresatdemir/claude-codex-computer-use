@@ -10,7 +10,7 @@ Türkçe: [README.tr.md](README.tr.md) · Changelog: [CHANGELOG.md](CHANGELOG.md
 
 ## What this is
 
-A thin, dependency-free MCP server (`server.mjs`, Node ≥ 22.14) that sits in front of [songkeys/claude-codex-computer-use](https://github.com/songkeys/claude-codex-computer-use) (the bridge that launches the signed Computer Use client) and adds what you need to work fast:
+A thin, dependency-free MCP server (`server.mjs` + `lib/pure.mjs`, Node ≥ 22.14, `npm test` for the pure parts) that sits in front of [songkeys/claude-codex-computer-use](https://github.com/songkeys/claude-codex-computer-use) (the bridge that launches the signed Computer Use client) and adds what you need to work fast:
 
 - **`script`** — a persistent JavaScript environment modelled on Codex's own `cua_repl`: loops, regex, conditions, zero model turns per click.
 - **`batch`** with text targeting (`find`), `wait_for`, conditionals, macros, dry-run.
@@ -39,16 +39,17 @@ Task: in Freeform create a board, insert an image via the Open panel, add a stic
 
 Script: [`examples/scripts/multi_app_task.js`](examples/scripts/multi_app_task.js). Board: `docs/example-multi-app-task.jpg`.
 
-Codex's own run was decoded from its session log (`~/.codex/sessions/*.jsonl`) and watched with process/network monitors; the architecture notes describe the layers (Swift service, Unix-socket IPC `CodexComputerUseIPC-5`, the `@oai/sky` REPL library, the model's contract: default AX diff, `emit:false`, implicit settle wait, per-app policy and approval, 21 named error codes).
+Five research reports (JS library, 59 Codex sessions with 3 627 calls, service/client binaries, host layer, our own code review) are in `docs/research/`. Codex's own run was decoded from its session log (`~/.codex/sessions/*.jsonl`) and watched with process/network monitors; the architecture notes describe the layers (Swift service, Unix-socket IPC `CodexComputerUseIPC-5`, the `@oai/sky` REPL library, the model's contract: default AX diff, `emit:false`, implicit settle wait, per-app policy and approval, 21 named error codes).
 
 ## Tools
 
-All of Codex's tools pass through (`get_app_state`, `click`, `press_key`, `type_text`, `set_value`, `scroll`, `drag`, `select_text`, `perform_secondary_action`, `list_apps`) with these additions on each: `include_screenshot` (default off; downscaled to 1280 px when on), `output: diff|full`, `find`/`role`/`nth` text targeting, `press_key.repeat`.
+All of Codex's tools pass through (`get_app_state`, `click`, `press_key`, `type_text`, `set_value`, `scroll`, `drag`, `select_text`, `perform_secondary_action`, `list_apps`) with these additions on each: `include_screenshot` (default off; downscaled to 1280 px when on), `output: diff|full`, `observe` (re-read the tree after an action when the reply has none), `find`/`role`/`nth` text targeting, `press_key.repeat`, key-name normalisation (`cmd+c` → `super+c`, `esc` → `Escape`; the service wants X11 keysyms).
 
 | Tool | What it does |
 |---|---|
 | **`script`** | Persistent JS: `const app = await cua.getApp("Freeform"); await app.click({find:"New Board"}); const ax = await app.getAXState(); app.find(ax, "Draw with Pen"); app.lastTextUnder(ax, "Edit field"); await app.nudge("right", 30); await app.menu(["Insert","Choose File"]); await app.openPath("/path/file.png"); await app.waitFor('Window: "Open"')`. Trees stay in variables; the model gets a log and a final diff. |
 | **`batch`** | Action list with `find`, `wait_for`, `if_present`/`if_absent`/`optional`, `repeat`, `params`, `save_as`, `dry_run`, `output:"diff"`, auto-recover, screenshot on error, per-step timings. |
+| **`paste`** | Paste text through the clipboard (⌘V, clipboard restored); Codex's REPL has `paste`, the MCP client doesn't. `format:"html"` pastes rich text. |
 | `menu` | Click a menu-bar path; skips intermediate items when the target is already visible. |
 | `open_path_in_dialog` | ⌘⇧G in an Open/Save panel → path → Return → waits for selection → confirms (Return, button fallback). |
 | `save_macro` / `run_macro` / `list_macros` | Parameterised macros in `~/.codex-cua-plus/macros.json` (`{{param}}`). Examples in `examples/macros/`. |
@@ -57,9 +58,9 @@ All of Codex's tools pass through (`get_app_state`, `click`, `press_key`, `type_
 | `recover` | Escape → menu Cancel action → title-bar click, each step verified. |
 | `status` | Version, ChatGPT.app / app-server / service / client state, ping, macros, notes. |
 
-Error codes from the service are annotated with a name and a hint (`-10012 userStoppedSession`: the user pressed Esc → loops stop; `-10016 userIntervened` → re-read; `-10018 ambiguousApp` → use the bundle id; `-10005` is split into `app-server exited` → ChatGPT.app is launched automatically, and `timeoutReached` → it is not).
+All 21 service error codes (-10000…-10020) and the plain-text replies (`not approved`, `user changed`, clipboard timeout, invalid secondary action, no window) are annotated with a name and a hint (`-10012 userStoppedSession`: the user pressed Esc → loops stop; `-10016 userIntervened` → re-read; `-10018 ambiguousApp` → use the bundle id; `-10005` is split into `app-server exited` → ChatGPT.app is launched automatically, and `timeoutReached` → it is not).
 
-App notes (`~/.codex-cua-plus/notes.json` + built-ins for Freeform and TextEdit) are attached once per app. Example built-in: *Freeform ignores synthetic drag; move a selected item with shift+arrow; clicking an image via accessibility opens Quick Look, select by coordinate instead.*
+App notes (`~/.codex-cua-plus/notes.json` + built-ins for Freeform, TextEdit, Calculator, Finder, Unity, Simulator) are attached once per app; `_match` notes trigger on tree content (Open/Save panels), `_screenshot` lists apps that get a screenshot by default (Simulator, Unity). Example built-in: *Freeform ignores synthetic drag; move a selected item with shift+arrow; clicking an image via accessibility opens Quick Look, select by coordinate instead.*
 
 ## Install
 
@@ -81,12 +82,14 @@ Environment: `CUA_PLUS_DEFAULT_OUTPUT` (`diff`), `CUA_PLUS_DEFAULT_SCREENSHOT` (
 2. Don't add fixed sleeps after actions — the service already waits. Use `waitFor` for a condition.
 3. Prefer keys that don't change the UI (≈10 ms) over clicks (≈1 s) where both work (Return to confirm, shift+arrow to move).
 4. If you see `-10012`/`-10016`, stop: the user is at the keyboard.
-5. Canvas apps (Freeform) ignore synthetic drag. Draw with the pen tool by clicking points; insert pictures as files; move items with shift+arrow.
+5. Send text with one `type_text` or `paste` (one settle wait per call, not per key). Key names are X11 keysyms; aliases are translated.
+6. Canvas apps (Freeform) ignore synthetic drag. Draw with the pen tool by clicking points; insert pictures as files; move items with shift+arrow.
 
 ## Repository
 
 ```
-server.mjs                          the wrapper (single file, no dependencies)
+server.mjs                          the wrapper (no dependencies)
+lib/pure.mjs                        pure helpers (tree parsing, diff, find, key names, error table); test/pure.test.mjs
 scripts/install.sh                  finds paths, registers the MCP server, installs example macros
 scripts/bench.py                    latency measurement against the bridge or the wrapper
 scripts/net_check.sh                network check during live calls
@@ -97,6 +100,7 @@ examples/macros/*.json              freeform_insert, textedit_write_save
 examples/freeform_insert_image.py   end-to-end driver without Claude (Python → wrapper)
 docs/codex-computer-use-mimarisi.md architecture analysis of Codex Computer Use, incl. service internals, Statsig config, app-instruction catalogue (Turkish)
 docs/gunluk-2026-10-01.md           day-one log, dead ends included (Turkish)
+docs/research/                      five deep-dive reports (Turkish) with an English index
 ```
 
 ## Credits

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 — 2026-10-02
+
+Five parallel research passes (JS library, 59 Codex sessions, service/client binaries, our own code, host layer; reports in `docs/research/`) and a code review of 0.7.2 drove this release.
+
+- **Correctness**: after every UI action the tree is re-read before the next `find`/`if_present`/`menu` step (the action reply's own tree is reused when present, so no extra round trip); invalid-index or "user changed" replies retry once with a re-resolved target. `findInTree`: path-like queries (`/Users/x`) are plain text, `/re/g` no longer skips matches, Turkish İ/diacritics fold, `nth` walks all candidates in score order, disabled elements rank last, `role` matches a word. `substitute` keeps numeric types (wait_for timeouts work in macros). `script`: timeout sets a cancel flag (no further actions are sent), RegExp from the script realm is recognised, diff base is per app, log capped at 500 lines, unknown-method errors point to `app.help()`.
+- **Protocol/process**: upstream-initiated requests (`elicitation/create`, `roots/list`) are relayed to the client and answered back; `ping` answered; 130 s upstream timeout; error codes preserved; `tools/call` serialised; bridge spawned in its own process group and killed as a group; `error` handlers on the child; Claude/Codex pipe variables filtered from the child environment; `-10000` no longer launches ChatGPT.app.
+- **New**: `paste` tool and `app.paste(text, {format:"text"|"html"})` through the clipboard (the MCP client lacks Codex's IPC `paste`); key-name normalisation (`cmd/command/win→super`, `opt→alt`, `esc`, `enter`, `backspace`, `pgup`, symbols) with the X11 keysym rule in the schema; `observe:false` on action tools; `click_count`/`mouse_button` documented; full service error table -10000…-10020 plus plain-text replies (`not approved`, `user changed`, clipboard timeout, invalid secondary action, no window); stuck-menu note on every result; `_match` notes triggered by tree content (Open/Save panels) and `_screenshot` per-app default screenshots (Simulator, Unity); Finder, Unity, Simulator notes; script helpers `pen`, `refind`, `keys`, `deselect`, `raise`, `compact`, `tail`, `screenshot`, `help` and aliases (`getState`, `type`, `press`, `performSecondaryAction`); `wait_for` accepts `re`.
+- **Code**: pure helpers moved to `lib/pure.mjs`; `npm test` runs 14 unit tests without the service; image size read from PNG/JPEG headers (two `sips` calls fewer); `tools/list` cached; all runtime messages in English; macros file never overwritten when it is invalid JSON.
+- Example fix: `examples/scripts/multi_app_task.js` now sends `37*41=` in one `type_text` and waits for the result row to change (the earlier run had read the expression instead of the result).
+
 ## 0.7.2 — 2026-10-02
 
 Second pass over Codex Computer Use, this time inside the service itself (binary, Statsig store, live `log stream`). Findings are in `docs/codex-computer-use-mimarisi.md` §6.
