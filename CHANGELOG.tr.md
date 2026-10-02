@@ -1,5 +1,15 @@
 # Değişiklikler
 
+## 0.9.0 — 2026-10-02
+
+Mühendislik sürümü: yapı, testler, teşhis, belgeler.
+
+- **Modüller**: `server.mjs` yalnızca araç işleyicileri ve protokol döngüsü; `lib/upstream.mjs` (köprü süreci, JSON-RPC, üst akış isteklerinin aktarımı), `lib/tools.mjs` (şemalar), `lib/notes.mjs` (notlar), `lib/config.mjs` (seçenekler), `lib/pure.mjs` (saf yardımcılar).
+- **Testler**: `npm test` 14 birim + 11 entegrasyon testi; entegrasyon testleri `test/mock-bridge.mjs` sahte istemcisine karşı çalışır (takılı menü, bayat indeks, elicitation aktarımı, script zaman aşımı, makrolar). Servis gerekmez; CI macOS'ta Node 22 ve 24 ile çalışır.
+- **CLI**: `node server.mjs doctor` (platform, Node, ChatGPT.app, başlatıcı/istemci yolları, servis soketi, npx, JSON dosyaları), `--version`, `--help`.
+- **Yapılandırma dosyası**: `~/.codex-cua-plus/config.json` (ortam değişkenleriyle aynı anahtarlar; `docs/CONFIGURATION.md`).
+- **Belgeler**: üretilmiş araç referansı `docs/TOOLS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `.editorconfig`, npm meta verisi; `install.sh` İngilizce ve sonunda `doctor` çalıştırıyor.
+
 ## 0.8.0 — 2026-10-02
 
 Beş paralel araştırma (JS kütüphanesi, 59 Codex oturumu, servis/istemci ikilileri, kendi kodumuz, host katmanı; raporlar `docs/research/`) ve 0.7.2 kod incelemesi bu sürümü şekillendirdi.

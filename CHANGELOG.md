@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 — 2026-10-02
+
+Engineering release: structure, tests, diagnostics, documentation.
+
+- **Modules**: `server.mjs` now only holds the tool handlers and the protocol loop; `lib/upstream.mjs` (bridge process, JSON-RPC link, relay of upstream-initiated requests), `lib/tools.mjs` (schemas), `lib/notes.mjs` (app notes), `lib/config.mjs` (options), `lib/pure.mjs` (pure helpers).
+- **Tests**: `npm test` runs 14 unit tests and 11 integration tests against `test/mock-bridge.mjs`, a fake Computer Use client with an in-memory app (stuck menu, stale index, elicitation relay, script timeout, macros). No service needed; CI runs them on macOS with Node 22 and 24 (`.github/workflows/ci.yml`).
+- **CLI**: `node server.mjs doctor` checks platform, Node version, the ChatGPT app, launcher and client paths, the service socket, npx and the JSON data files; `--version`, `--help` (lists every option).
+- **Config file**: `~/.codex-cua-plus/config.json` with the same keys as the environment variables (`docs/CONFIGURATION.md`).
+- **Docs**: generated tool reference `docs/TOOLS.md` (`scripts/gen-tool-docs.mjs`, from the schemas + a snapshot of the client's tool list in `docs/upstream-tools.json`), `SECURITY.md` (what the wrapper touches, the `script` trust boundary), `CONTRIBUTING.md`, `.editorconfig`, npm metadata.
+- `install.sh` in English, runs `doctor` at the end.
+
 ## 0.8.0 — 2026-10-02
 
 Five parallel research passes (JS library, 59 Codex sessions, service/client binaries, our own code, host layer; reports in `docs/research/`) and a code review of 0.7.2 drove this release.

@@ -236,7 +236,7 @@ cd claude-codex-computer-use
 
 Betik; Node 22'yi, ChatGPT.app içindeki imzalı `codex` ve `SkyComputerUseClient` yollarını bulur, `codex-computer-use` adıyla kullanıcı geneli MCP kaydı yapar (varsa eskisini kaldırır). Ardından **yeni bir Claude Code oturumu** aç.
 
-Elle kayıt istersen `scripts/install.sh` içindeki `claude mcp add` komutunu kopyala.
+Elle kayıt istersen `scripts/install.sh` içindeki `claude mcp add` komutunu kopyala. Kurulumu `node server.mjs doctor` ile denetle; seçenekler için `node server.mjs --help` ve `docs/CONFIGURATION.md`.
 
 > Node 22 kurulumunda `nvm install 22` checksum hatası verip kaynaktan derlemeye geçerse durdur; `nvm ls-remote 22` ile bir alt sürümü (ör. 22.20.0) kur.
 
@@ -298,7 +298,8 @@ scripts/install.sh                 yolları bulur, MCP kaydını yapar
 scripts/bench.py                   köprü gecikme ölçümü
 scripts/net_check.sh               çağrı sırasında ağ bağlantısı var mı?
 scripts/service_trace.py           servis logundan istek başına bekleme/yakalama/ağaç süreleri
-lib/pure.mjs + test/               saf yardımcılar ve birim testleri (npm test)
+lib/                               modüller (upstream, tools, notes, pure, config); test/: birim + entegrasyon testleri, sahte köprü (npm test)
+docs/TOOLS.md, docs/CONFIGURATION.md  araç referansı (üretilmiş) ve seçenekler; SECURITY.md, CONTRIBUTING.md
 docs/research/                     beş derin inceleme raporu (Türkçe)
 examples/freeform_insert_image.py  Claude'suz uçtan uca örnek (Python → sarmalayıcı)
 examples/draw_house.py             Pillow ile ev sahnesi
