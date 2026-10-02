@@ -152,3 +152,12 @@ test("status reports version and socket state without crashing on a mock", async
   assert.match(text(s), /codex-cua-plus \d+\.\d+\.\d+/);
   assert.match(text(s), /list_apps ping: \d+ ms \(2 running apps\)/);
 });
+
+test("app objects reused in a later call are not cancelled by the previous call's timeout timer", async () => {
+  const r1 = await call("script", { code: "globalThis.keep = await cua.getApp('Demo');", timeout_ms: 1000, output: "none" });
+  assert.ok(!r1.isError, text(r1));
+  await new Promise((res) => setTimeout(res, 1200)); // the old timer would have fired by now
+  const r2 = await call("script", { code: "await keep.pressKey('a'); log('ok');", output: "none" });
+  assert.ok(!r2.isError, text(r2));
+  assert.match(text(r2), /ok/);
+});

@@ -4,7 +4,7 @@
 [![Node ≥ 22.14](https://img.shields.io/badge/node-%E2%89%A5%2022.14-brightgreen)](package.json)
 [![macOS](https://img.shields.io/badge/platform-macOS%2014.4%2B-lightgrey)](#requirements)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.0-informational)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.1-informational)](CHANGELOG.md)
 
 **Drive macOS apps from Claude Code through the Computer Use engine that ships with OpenAI's ChatGPT/Codex desktop app — without spending Codex quota, and without a model round trip per click.**
 

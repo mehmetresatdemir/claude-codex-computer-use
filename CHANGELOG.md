@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 — 2026-10-02
+
+- Fix: the `script` timeout timer kept running after a call finished and later flagged app objects created in that call as cancelled ("script timed out; no further actions are sent" in a following call). Found while drawing the 8-cube in several 9-minute script calls. Regression test added.
+
 ## 0.9.0 — 2026-10-02
 
 Engineering release: structure, tests, diagnostics, documentation.

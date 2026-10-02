@@ -494,7 +494,9 @@ function main() {
     const timeoutMs = Number(args.timeout_ms ?? 120000);
     try {
       const fn = vm.runInContext(`(async () => { ${args.code}\n })`, scriptCtx, { timeout: 5000 });
-      await Promise.race([fn(), sleep(timeoutMs).then(() => { state.cancelled = true; throw new Error(`script timed out after ${timeoutMs} ms (no further actions are sent)`); })]);
+      let timer;
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => { state.cancelled = true; reject(new Error(`script timed out after ${timeoutMs} ms (no further actions are sent)`)); }, timeoutMs); });
+      try { await Promise.race([fn(), timeout]); } finally { clearTimeout(timer); } // a timer left running would cancel app objects reused by later calls
     } catch (e) { error = e?.message || String(e); if (/not a function/.test(error)) error += " — call app.help() for the method list"; }
     const appName = args.app || [...state.apps][0];
     const header = [`script: ${error ? "ERROR: " + error : "ok"} (${Date.now() - t0} ms, ${state.actions || 0} actions)`, ...state.logs.map((l) => `  ${l}`)].join("\n");

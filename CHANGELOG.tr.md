@@ -1,5 +1,9 @@
 # Değişiklikler
 
+## 0.9.1 — 2026-10-02
+
+- Düzeltme: `script` zaman aşımı zamanlayıcısı çağrı bittikten sonra çalışmaya devam edip o çağrıda yaratılan uygulama nesnelerini sonradan iptal ediyordu (bir sonraki çağrıda "script timed out; no further actions are sent"). 8-küp çizimi sırasında bulundu; regresyon testi eklendi.
+
 ## 0.9.0 — 2026-10-02
 
 Mühendislik sürümü: yapı, testler, teşhis, belgeler.
