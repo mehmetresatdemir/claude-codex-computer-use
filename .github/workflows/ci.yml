@@ -5,7 +5,8 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: macos-latest
+    # The suite needs no macOS: the integration tests run against test/mock-bridge.mjs (pure Node).
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         node: [22, 24]
